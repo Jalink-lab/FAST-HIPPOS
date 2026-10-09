@@ -8,7 +8,7 @@
 #@ File (label = "LIF file containing tile positions", style = "file") lifFile
 #@ Integer (label = "Grid layout: nr of X tiles", min=0, value=0) gridSizeX
 #@ Integer (label = "Grid layout: nr of Y tiles", min=0, value=0) gridSizeY
-#@ Boolean(label="Correct pixelsize (bugfix for stupid Leica mistake)", value=true) correctPixelSize
+#@ Boolean(label="Correct pixelsize (fix for Leica misinterpretation)", value=true) correctPixelSize
 
 setBatchMode(true);
 list = getFileList(inputFolder);
@@ -75,7 +75,7 @@ saveAs("Tiff", outputFolder + File.separator + substring(tileBaseName, 0, tileBa
 function getStagePositions(lifFile, imageList) {
 	//Get stage coordinates of all the tiles. N.B. Counting always starts at the first tile in the .lif file.
 	print("\\Clear");
-	run("NKI get stage coordinates to log window", "file=["+lifFile+"], nrtiles="+imageList.length);	//Run a Jython script to print the stage coordinates to the log window
+	run("Get stage coordinates to log window", "file=["+lifFile+"], nrtiles="+imageList.length);	//Run a Jython script to print the stage coordinates to the log window
 	logWindow = getInfo("log");
 	stagePositions = split(logWindow, "\n");
 	print("\\Clear");

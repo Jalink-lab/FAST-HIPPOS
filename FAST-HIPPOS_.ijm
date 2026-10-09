@@ -1,428 +1,72 @@
-/*	Macro to measure and display fluorescence lifetimes or intensitues of individual cells in time-lapse experiments.
- * 	Also used for detecting hits in a screen.
+/*	FAST_HIPPOS
+ * 	A Fiji Macro to measure and display fluorescence lifetimes, ratio or intensities of individual cells in time-lapse experiments.
+ * 	And detect hits in optical pooled screens.
  * 	
- * 	Input:
- * 	► 2-channel .tif files representing two lifetime-components measured with TCSPC (e.g. files exported from Stellaris/SP8)
- * 	  Optionally a third channel with a nuclear marker			
- * 	► .fli files from the Lambert Instruments Frequency-Domain FLIM microscope
- * 	► Leica TauContrast, TauSeparation timelapse images
- * 	► 2-channel .tif files with ratio imaging
- * 	► single-channel timelapse images with intensities
- *
- *	Brief workflow: 			  
- *	► Segment cells (create labelmap) using Cellpose, and optionally segment nuclei with StarDist
- *	► If a nuclear marker is used, nuclear labels are assigned to cellular labels. Single nuclei without a detected cell are also assigned a cellular label
- *	► Measure the intensity-weighted lifetime of all labels
- *	► Display the lifetime traces in a graph
- *	► Display the lifetime traces in a kymograph-like image
- *	► Determine stimulation and calibration time points from the second derivative of the average lifetime trace of all labels
- *	► Sort the kymograph on cellular response
- *	
- *	 * Requires the following update sites:
- * - CLIJ
- * - CLIJ2
- * - CSBDeep
- * - ImageScience
- * - IJ-PB Plugins
- * - PTBIOP
- * - SCF MPI CBG
- * - StarDist
- * You also need a working Cellpose Python environment, and the 'Turbo' LUT (https://github.com/cleterrier/ChrisLUTs/blob/master/Turbo.lut)
- * For FD-FLIM analysis you need the plugin by Rolf Harkes (https://github.com/rharkes/fdFLIM/)
+ * 	See https://imagej.net/plugins/fast-hippos
+ * 	
+ * 	
  * 
- *	Author: Bram van den Broek, The Netherlands Cancer Institute, b.vd.broek@nki.nl
+ *	Author: Bram van den Broek, The Netherlands Cancer Institute (Kees Jalink lab)
+ *	For questions please use the Image.sc forum (https://forum.image.sc/) with tag @bramvdbroek.
  *	
- *	version 1.4:
- *	- Added flow threshold parameter for Cellpose
- *	- Added sensitivity for detecting stimulation and calibration
- *	- Added possibility to restrict the image for Cellpose to the first n frames
- *	- Small bug fixes
- *	
- *	version 1.5:
- *	- Added feature to overlay lifetime with the intensity movie instead of the still intensity image
- *	- Keep ROI manager open to allow saving the ROIs at the end. Due to this, converting the labelmap to ROIs is now a bit slower.
- *	- More small bug fixes
- *	
- *	version 1.7:
- *	- Reinstated the nuclei detection part
- *	
- *	Version 2.0:
- *	- United with the script that was used for screening, and improved that part on many aspects, notably:
- *	- Cell-nucleus linking faster and more robust, now using CLIJ2_argMaximumZProjection()
- *	- Added hit selection criteria
- *	- Create a top N hits selection
- *	- Plotting the hits and tiles
- *	
- *	Version 2.1:
- *	- NaN pixels in the weighted lifetime do no longer cause missing pixels in the overlay
- *	
- *	Version 2.2:
- *	- Added support for Ratio Imaging (most figures and tables are still called 'lifetime')
- *	
- *	Version 2.2:
- *	- The positions in the hit list are now correct when no nuclei channel is present in the .lif file
- *	- Improved .rgn file generation, with UUID.
- *	  
- *	Version 2.5:
- *	- Screening: plot the lifetime traces of the hits in a separate plot
- *	- Screening: Color the ROIs according to the traces
- *	
- *	Version 2.6:
- *	- Screening: Hit finding on mean response can now be set to the first n seconds
- *	- Screening: Added fitting traces (not complete yet - need a lot of selection criteria)
- *	
- *	Version 2.7:
- *	- Screening: Hit finding on mean response can now be set to a flexible time window
- *	- Added frame interval to RGB overlay image
- *	  
- *	Version 2.8:
- *	- Added possibility to smooth the traces (and for now, the data as well)
- *	- Other small improvements/changes
- *	
- *	Version 2.9:
- *	- Screening: Possibility to determine hits based on the max difference to the *average* baseline of all cells 
- *	
- *	Version 2.95:
- *	- Screening: Possibility to remove the last frame (sometimes (partially) empty) 
- *	- Various small bug fixes concerning finding hits
- *	- renamed 'lifetime traces image' to 'kymograph'
- *	
- *	Version 2.96-2.97:
- *	- Screening: Save empty graphs when no hits are found (necessary for pooling results in 'Screen_inspect_output_traces.ijm'
- *	- Moved 'remove last frame' option to the script parameters. (fixing a bug where removeLastFrame_boolean did not exist when not running a screen)
- *	
- *	Version 3.0:
- *	- Possibility to re-analyze screening data from saved data (no segmentation - much faster)
- *	- Weighted lifetime image is now also saved (Why not before? Beats me!)
- *	
- *	Version 3.1:
- *	- Segmentation can now be performed on a custom range of frames
- *	
- *	Version 3.2:
- *	- Critical bug fix where the RGB overlay colors did not match the LUT
- *	- Incorporated different Lookup Tables (for the visually challenged)
- *	- Added parameter for the brightness of the RGB overlay
- *	- Fancyfied starting dialog with HTML code
- *	
- *	Version 3.3:
- *	- save Stage Positions in a text file
- *	
- *	Version 3.4:
- *	- Greatly speeded up conversion from labelmap to ROI Manager, using CLIJ2
- *	
- *	Version 3.5:
- *	- Save a table with the cell coordinates for every tile
- *	- Screening: added possibility for absolute maximum lifetime
- *	
- *	Version 3.6:
- *	- cell coordinates are now saved in a single table containing all tiles
- *	
- *	Version 3.7:
- *	- Added possibility to analyze intensity-only data
- *	
- *	Version 3.8:
- *	- Added a parameter for the axis font size of the output plots 
- *	
- *	Version 3.9:
- *	- Finally made traces fitting available
- *	
- *	Version 4.0:
- *	- Added TauContrast support (in 'microscopy')
- *	- Fixed some bugs in the trace fitting
- *	
- *	Version 4.01:
- *	- Added .lif file support for TauContrast (but only single series files)
- *	
- *	Version 4.03:
- *	- Fixed bugs concerning non-timelapse experiments
- *	
- *	Version 4.05:
- *	- Added confidence interval (3 sigma around the mean) in the traces plot
- *	
- *	Version 4.1:
- *	- Added TauContrast and TauSeparation channels in the script parameters
- *	- FDFLIM settings are now hidden, because we don't use them.
- *	
- *	Version 4.2:
- *	- Added xy drift correction
- *	- Fixed typo in Cellpose command, causing 'additional flags' message
- *	- TCSPC fitted / TauSeparation files are now opened using Bio-Formats (because in the latter case it is a .lif file)
- *	- NaNs in the weighted lifetime image are now set to 0, removing artifacts caused by drift / movements (presumably)
- *	
- *	Version 4.4:
- *	- Added Fast FLIM option on exported .tif files containing intensity + lifetime channels, with lifetime values in picoseconds - for Ron Hoebe
- *	- Added multi-series support for .lif files
- *	
- *	Version 4.5:
- *	- histogramBins is now a variable (but not in the script parameters)
- *	- Fixed a bug where the macro would crash if smoothing the RGB image/movie was set to 0 for non-timelapse experiments
- *	
- *	Version 4.6:
- *	- Fixed crashing of the macro when no cells are detected
- *	- Added the Cellpose model as parameter
- *	- Calibration bar position is now a parameter
- *	
- *	Version 4.7:
- *	- Rolled back NaNs to zeros from version 4.2, because it causes artifacts in the RGB overlay when smoothing.
- *	- Finally fixed the number of decimals in the script parameters
- *	- The macro now also outputs a statistics table containing area, intensity (of the projection!), coordinates etc. of the measured cells.
- *	- Scatter plots are created of lifetime vs area and lifetime vs intensity (of the projection!)
- *	- For non-timelapse images also scatter plots lifetime-area and lifetime-intensity are generated.
- *	- Changed default saturatedPixels variable (was set to 3). This changes the cell segmentation.
- *	
- *	Version 4.8:
- *	- Fixed drift correction and smoothing artifact issue by (for smoothing) replacing zeros for NaNs and then padding them with the mean of surrounding pixels
- *	- Separated XY and Time smoothing
- *	- Created parameter for creating scatterplots
- *	- Fixed cell mismatch in scatterplots - colors now match with colors of the traces
- *	 
- *	Version 4.92:
- *	- Rank vector is now also displayed and saved (necessary for selecting traces in the kymograph)
- *	- Showing gidlines in the plot(s) is now a parameter
- *	- Fixed orientation of sorted kymograph (horizontal flip) 
- *	- Fixed formatting of doubles in script parameters
- *	- 4.92b: temporarily reinstated FDFLIM options
- *	
- *	Version 4.93:
- *	- Added possibility to measure intensity in an additional channel
- *	
- *	Version 4.94:
- *	- Fixed a regression issue where filenames were 'doubled' in the output
- *	
- *	Version 4.95:
- *	- fixed some issues regarding curve fitting
- *	
- *	Version 4.96:
- *	- Added the 'first segment, then analyze' option (not a parameter yet). To speed up segmentation all images are loaded and put into a hyperstack. Cellpose runs only once and saves the labelmaps.
- *	  The implementation comes with a lot of if..else statements and should be rewritten at some point.
- *	  Also, lifetimes and intensity images are calculated twice, as well as drift correction; when activted the processing can actually be slower.
- *	  
- *	Version 4.97 + 4.98:
- *	- Added timelapse lifetime histograms
- *	- bug fixes regarding the 'first segment, then analyze' option.
- *	
- *	Version 4.99:
- *	- Included a 'Density plot', a 2D-histogram of 1D-histograms vs time.
- *	
- *	Version 5.01:
- *	- Fixed mistake concerning bidirectional correction
- *	- (Temporarily) fixed pixel size issue by not using Bio-Formats.
- *	- Hits can now be detected on non-timelapse images.
- *	- Hit coordinate files (.rgn) are saved in chucks of 'MaxNrHits'.
- *	
- *	Version 5.02:
- *	- Bidirectional phase mismatch correction does not require images with 2^n x 2^n pixels any more.
- *	
- *	Version 5.03:
- *	- Added possibility to sorts hits on lifetime.
- *	
- *	Version 5.05:
- *	- Fixed hit positions for merged images.
- *	
- *	Version 5.06:
- *	- Use 'NKI Labelmap to ROI Manager' groovy script in stead of IJ1 Macro function (speeds up this step a bit).
- *	
- *	Version 5.07:
- *	- Reverted change of 5.06.
- *	- Included the new 'Lifetime' LUT.
- *	
- *	Version 5.10:
- *	- Fixed bug when measuring additional channel (Exiting batch mode for Cellpose now displays the orignal image)
- *	- A timelapse scatterplot of additional channel intensity vs lifetime is created.
- *	
- *	Version 5.11:
- *	- Reinstated FDFLIM options
- *	- Fixed bug where multiseries fli files were opened multiple times
- *	- Introduced a 1-minute waiting step in case Cellpose fails (This happens with FDFLIM images; for unknown reasons the temp image is not saved unless you wait some time).
- *	
- *	Version 5.12:
- *	- Fixed small bug regarding drift correction
- *	- Changed appearance of RGB overlay script parameter (now radiobuttons)
- *	- Added some comments
- *	
- *	Version 5.20:
- *	- Many small changes and improvement in the screening part; More options, GUI changes, easier calculation, fool-proofing
- *	
- *	Version 5.21:
- *	- Added option to use custom Cellpose model
- *	
- *	Version 5.22 & 5.23:
- *	- Screening: added additional option to restrict hits to traces with a baseline close to the average baseline
- *	- Fixed bug that caused macro to crash on Taucontrast .tif files (image displaying issue)
- *	- Moved nrTilesX and nrTilesY down to the screening part of the script parameter dialog
- *	
- *	Version 5.24:
- *	- TauSeparation .lif files are opened using BioFormats importer (not showing the popup window). TCSPC .tif files are opened with the standard opener.
- *	
- *	Version 5.30:
- *	- Screening: added option to find hits based on the mean intensity in the additional channel + some extras
- *	
- *	Version 5.40:
- *	- Added possibility to load a labelmap from disk
- *	- Added option to skip RGB overlay visualization in order to speed up the processing
- *	- Added option to speed up ROI handling (using BIOP plugin)
- *	- Fixed bug where drift corretion crashed when the data has only 1 frame
- *	
- *	Version 5.50:
- *	- Screening: tile layout is found automatically for images processed with 'stitch_tiles.ijm'.
- *	- Hit positions should now always be correct
- *	- Other small improvements
- *	
- *	Version 5.6:
- *	- Various screening improvements (e.g. calculating averages without NaNs)
- *	- lifetime and intensity measurements are now performed using CLIJ2 (GPU). This makes the processing much faster for experiments with many cells
- *	
- *	Version 5.8:
- *	- Added histograms and kymographs of hits only, and of non-hits (still to be finished)
- *	
- *	Version 5.9:
- *	- Screening parameters are now saved and loaded to/from disk
- *	
- *	Version 5.91:
- *	- Last version that creates tables with cells as columns (becomes very slow for many cells)
- *	
- *	Version 6.00:
- *	- Lifetime table is created transposed, only if the (not displayed) parameter 'generateTables' below is set to true.
- *	  The table is not necessary any more, because all graphs are created from the kymographs.
- *	- Other small improvements
- *	
- *	Version 6.01:
- *	- Enabled negative overlap detection from metadata of the stitched image
- *	
- *	Version 6.03:
- *	- Activated FD-FLIM parameters
- *	- Added a minimum cell intensity selection parameter
- *	
- *	Version 6.10:
- *	- New faster method for measuring intensities without generating a huge table, using ROI Manager
- *	- Generate 'normalized kymograph' and traces graph, where all baselines are moved to the average baseline
- *	- Switched some parameters in the GUI (e.g. Default Frame Interval)
- *	- Added text overlay to the traces graph with the smoothing factor in pixels 
- *	
- *	Version 6.11:
- *	- Included option for screening on the rise time of the response
- *	
- *	Version 6.12:
- *	- Small bug fixes concerning the changes in 6.11
- *	
- *	Version 6.13:
- *	- Bidirectional phase mismatch correction now works on the timelapse instead of only the intensity image
- *	
- *	Version 6.15:
- *	- Moved screening parameters to the screening dialog
- *	- Added feature to measure baseline only (no stimulation/calibration) on all frames
- *	
- *	Version 6.16:
- *	- Fixed hit finding in additional channel. Also works without tables.
- *	- Inverted the parameter to create the RGB overlay image
- *	
- *	Version 6.17:
- *	- Added possibility for screening with only baseline and calibration. To activate, manually enter the stimulation and calibration frames, where the stimulation frame is 0.
- *	- Added a maximum circularity parameter to exclude very round cells
- *	- Copied some screening parameters back to the main script parameter dialog (necessary for sorting kymographs when not screening).
- *	
- *	Version 6.19:
- *	- 6.18: Some bug fixes introduced in version 6.17
- *	- 6.19: Added a time column (at the end) in the lifetime table 
- *	
- *	Version 6.20:
- *	- Possibility to manually 'segment' cells or regions. To do so, select 'manual segmentation' in the Cellpose model field
- *	
- *	Version 6.21:
- *	- Improved GUI with headings
- *	
- *	Version 6.31:
- *	- Adapted for new Cellpose Fiji wrapper
- *	- Possibility to generate random hits in the screening (convenient for testing purposes)
- *	- Added a boolean for loading the labelmap
- *	
- *	Version 6.32:
- *	- Implemented support for Lambert Instruments FD-FLIM recordings with SPAD Toggel camera.
- *	- Added a choice of using lifetime from phase or modulation
- *	
- *	Version 6.40:
- *	- Automatic Cellpose env_path and env_type detection
- *	
- *	Version 6.41:
- *	- Added baseline_calibration_difference_number_high parameter
- *	
- *	Version 6.48:
- *	- Screening: hit selections criteria can now be combined with AND or OR logic
- *	- Fixed a small bug where positions would be wrong in re-analysis when no RGB image was created.
- *	- Added 'fraction of max response' as hit searching criterium
- *	
- *	Version 6.50:
- *	- Synchonization between script parameters and dialog parameters (stimulationSensitivity and manualStimCalFrames)
- *	- Hit detection region is now visualized on the hit only plot
- *	
- *	Version 6.50:
- *	- Fixed small mistake (update of 6.41 didn't work properly).
- *
- *	Version 6.60:
- *	- !! Changed the calculation of the intensity image for TCSPC images !! 
- *	  This was previously done by adding the two components, but since the components represent amplitudes of the two lifetimes 
- *	  it actually should be weighted by the lifetimes. This is now implemented correctly, but could lead to slightly different results than in earlier versions.
- *	  
- *	Version 6.61:
- *	- Fixed a bug where the macro would crash when in re-analysis no hits were found
- *	
- *	Version 6.64:
- *	- Added possibility to segment cells on a user-defined channel
- *	- Fixed bug where the macro would crash in baseline only mode
- *	
- *	Version 6.65
- *	- Corrected selection of the baseline, response and calibration parts in the kymograph (crashed when the image size was smaller than the number of frames) 
- *	- Fixed kymograph and density plot of non-hits
  *	
  *	To do:
- *	- Separate segmentation from measurements; create possibility to run single, or both.
- *		- separate macros? macro tools?
  *	- Recombine with StarDist / Cellpose nuclei
  *	- Check (and fix) behaviour with nuclei as second channel
- *	- Check and update hit finding scheme
  *	- possibility to change min and max lifetime / other visualization options
  *	- 'Tracking' by using 3D Cellpose / Trackmate / BIOP Trackmate on ROIs (check earlier macro for this)?
- *	- Hide parameters in other dialogs, store using preferences or hidden script parameters
+ *	- Hide parameters in 'expert dialogs', store using preferences or hidden script parameters
  *	
- *	- Clean up code
+ *	First release: version 0.9.2
+ *	
+ *	Changelog:
+ *	v0.9.3:
+ *	- Added possibility to classify cells based on the additional channel intensity. These are visualized in the 'lifetime vs additional channel intensity' scatterplot.
+ *	
+ *	v0.9.4:
+ *	- Added possibility to refine nuclei positions based on a Labkit classifier. The classifier is provided with FAST-HIPPOS, but can be replaced by your own trained classifier.
+ *	  (N.B. The current classifier has 'labkitNucleiChannel = 3'; not in script parameters, but hardcoded in the Labkit nuclei classifier parameters below.)
+ *	
+ *	v0.9.5:
+ *	- Improved the path of hit cells in the .rgn output files + visualizations
  *	
  */
 
-version = 6.65;
-
-#@ String	file_and_image_message	(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Input file settings</p></html>", visibility="MESSAGE") 
-#@ String	microscope				(label = "Input file microscopy type", choices={"Confocal TCSPC / TauSeparation", "Fast FLIM", "TauContrast", "Frequency Domain FLIM", "Ratio Imaging", "Intensity only"}, style="listBox")
-#@ File[]	file_list				(label = "Input files (exported .tif, .lif or .fli files)", style="File")
-#@ File		output					(label = "Output folder", style = "directory") 
+#@ String	fast-hippos_message		(value="<html><p style='font-size:12px; color:#663399; font-weight:bold'><a style='color:#663399' href='https://imagej.net/plugins/fast-hippos'>FAST-HIPPOS</a>: FLIM Analysis of Single-cell Traces for Hit Identification of Phenotypes in Pooled Optical Screening</p></html>", visibility="MESSAGE", required=false, persist=false) 
+#@ String	fast-hippos_image		(value="<html><a style='color:#000000' href='https://imagej.net/plugins/fast-hippos'><img width=128 height=128 src='https://imagej.net/media/icons/FAST-HIPPOS-icon.png'</img></a></html>", visibility="MESSAGE", required=false, persist=false) 
+#@ String	file_and_image_message	(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Input file settings</p></html>", visibility="MESSAGE", required=false, persist=false)
+#@ String	microscope				(label="Input file microscopy type", choices={"Fitted TCSPC data / TauSeparation", "Fast FLIM", "TauContrast", "Frequency Domain FLIM", "Ratio Imaging", "Intensity only"}, style="listBox")
+#@ File[]	file_list				(label="Input files (exported .tif, .lif or .fli files)", style="File")
+#@ File		output					(label="Output folder", style = "directory") 
 #@ Boolean	segmentFirstAnalyzeLater(label="Segment all images before analyzing (faster, but dimensions must be the same)", value=true)
 
-#@ String 	confocal_message		(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>FLIM and image settings</p></html>", visibility="MESSAGE")
+#@ String 	confocal_message		(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>FLIM and image settings</p></html>", visibility="MESSAGE", required=false, persist=false)
 #@ Integer	intensityChannel		(label="TCSPC fitted / TauContrast / TauSeparation (first) channel", value=1, description="TauContrast saves with an additional (hidden) intensity channel. Choose the LAS X channel that shows the TauContrast lifetime.")
 #@ Double	tau1					(label="Lifetime component 1 (ns)", value=0.6, description="For fitted TCSPC or TauSeparation data", style="format:0.00")
 #@ Double	tau2					(label="Lifetime component 2 (ns)", value=3.4, description="For fitted TCSPC or TauSeparation data", style="format:0.00")
 #@ Double	default_frameInterval	(label="Default frame interval (s) (if not found)", value = 5, style="format:#.0")
 #@ Boolean	correctBidirect_boolean	(label="Correct bidirectional phase mismatch",value=false)
 #@ Boolean	correctDrift_boolean	(label="Correct xy drift (using intensity)",value=false)
-#@ String	registration_against	(label = "Registration against [Drift correction]", choices={"First frame","Last frame","Previous frame"}, style="listBox")
+#@ String	registration_against	(label="Registration against [Drift correction]", choices={"First frame","Last frame","Previous frame"}, style="listBox")
 #@ Boolean	edge_detect				(label="Edge-detect before registration? [Drift correction]", value=false)
 #@ Integer	additionalChannel		(label="Measure intensity in additional channel (-1 if N/A)", value=-1, min=-1)
 #@ Boolean	removeLastFrame_boolean	(label="Remove last frame (sometimes (partially) empty)", value=false)
 #@ Integer	nucleiChannel			(label="Nuclei channel in the .lif file (-1 if not present)", value=-1)
 
 //#@ String	FDFLIM_message			(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Frequency Domain FLIM settings</p></html>", visibility="MESSAGE")
-//#@ File		reference				(visibility=INVISIBLE, label = "Reference file", style = "file", required=false)
-//#@ Integer	phases					(label="Number of phases", value = 12)
-//#@ Integer	freq					(label="Frequency (MHz)", value = 40)
+//#@ File		reference			(visibility=INVISIBLE, label = "Reference file", style = "file", required=false)
+//#@ Integer	phases				(label="Number of phases", value = 12)
+//#@ Integer	freq				(label="Frequency (MHz)", value = 40)
 //#@ Double	tau_ref					(label="Lifetime of the reference", value = 3.93)
 //#@ String	tauPhiOrTauMod			(label = "Get lifetime from", choices={"phase", "modulation"}, style="radioButtonHorizontal")
-//#@ Boolean	FDFLIM_SPAD_camera		(label="SPAD camera?", value = false)
+//#@ Boolean	FDFLIM_SPAD_camera	(label="SPAD camera?", value = false)
 
-#@ String	segmentation_message	(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Cell segmentation settings</p></html>", visibility="MESSAGE")
+#@ String	segmentation_message	(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Cell segmentation settings</p></html>", visibility="MESSAGE", required=false, persist=false)
 #@ Integer	segmentationChannel		(label="Segment cells on channel (-1 if no dedicated channel is present)", value=-1)
 #@ Boolean	load_labelmap_boolean	(label="Load labelmap from disk instead of Cellpose segmentation?", value=false)
-#@ File		labelmapPath			(label = "Labelmap path", style="File", required=false, description="Load segmented labels from disk instead of running Cellpose segmentation.")
-#@ String	CellposeModel			(label = "Cellpose model", choices={"cyto2_cp3","cyto3","nuclei","custom", "manual segmentation"}, style="listBox", value="cyto3")
-#@ File		cellposeModelPath		(label = "Custom Cellpose model path", style="File", required=false)
+#@ File		labelmapPath			(label="Labelmap path", style="File", required=false, description="Load segmented labels from disk instead of running Cellpose segmentation.")
+#@ String	CellposeModel			(label="Cellpose model", choices={"cyto3","cyto2_cp3","nuclei","cpsam","custom", "manual segmentation"}, style="listBox", value="cyto3")
+#@ File		cellposeModelPath		(label="Custom Cellpose model path", style="File", required=false)
 #@ Boolean	equalize_contrast_cp	(label="Enhance contrast before cell segmentation (Gamma correction)", value=false)
 #@ Integer	CellposeStartFrame		(label="Start frame for segmentation (-1 for the full timelapse)", value=-1)
 #@ Integer	CellposeEndFrame		(label="End frame for segmentation (-1 for the full timelapse)", value=-1)
@@ -435,16 +79,16 @@ version = 6.65;
 #@ Integer	minCellBrightness		(label="Minimum cell intensity (gray values)", value=0, min=0)
 #@ Double	StarDistProbThreshold	(label="Nuclei Probability threshold [StarDist]", style="scroll bar", value=0.4, min=0.0, max=1.0, stepSize=0.1)
 
-#@ String	display_message			(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Output and visualization settings</p></html>", visibility="MESSAGE")
-#@ String	lut						(label = "Lookup table", choices={"Lifetime", "Turbo", "Fire", "mpl-viridis", "mpl-plasma", "mpl-viridis", "phase", "glow", "Grays"}, style="listBox", value="Turbo")
+#@ String	display_message			(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Output and visualization settings</p></html>", visibility="MESSAGE", required=false, persist=false)
+#@ String	lut						(label="Lookup table", choices={"Lifetime", "Turbo", "Fire", "mpl-viridis", "mpl-plasma", "mpl-viridis", "phase", "glow", "Grays"}, style="listBox", value="Turbo")
 #@ Double	minLifetime				(label="Min. displayed lifetime(ns)", value=2.0, style="format:0.0")
 #@ Double	maxLifetime				(label="Max. displayed lifetime(ns)", value=3.4, style="format:0.0")
 #@ Double	smoothRadiusTraces		(label="Smooth traces (graphs, scatterplots, hit detection) with radius", value=0.0, min=0.0, style="format:0.0")
 #@ Double	smoothRadiusOverlayXY	(label="Smooth lifetime in overlay movie with radius (x and y)", value=1.0, min=0.0, style="format:0.0")
 #@ Double	smoothRadiusOverlayTime	(label="Smooth lifetime in overlay movie with radius (time)", value=1.0, min=0.0, style="format:0.0")
-#@ String	overlayMovie			(label = "Create RGB lifetime overlay on", choices={"intensity image", "intensity movie"}, style="radioButtonHorizontal")
+#@ String	overlayMovie			(label="Create RGB lifetime overlay on", choices={"intensity image", "intensity movie"}, style="radioButtonHorizontal")
 #@ Double	RGB_brightness			(label="Brightness of RGB overlay [0-5]", value=3, min=0, max=5, style="format:0.0")
-#@ String	calibrationBarPosition	(label = "Calibration bar position", choices={"Upper Right","Upper Left","Lower Right","Lower Left"}, style="listBox", value="Upper Right")
+#@ String	calibrationBarPosition	(label="Calibration bar position", choices={"Upper Right","Upper Left","Lower Right","Lower Left"}, style="listBox", value="Upper Right")
 #@ Boolean	displayGrid				(label="Display grid lines in plot", value=true)
 #@ Integer	axisFontSize			(label="Output plot axis font size", value=18)
 #@ Boolean	createHistogram			(label="Create timelapse histogram", value=true)
@@ -452,15 +96,20 @@ version = 6.65;
 #@ Boolean	createRGBOverlay		(label="Create RGB overlay", value=false)
 #@ Boolean	generateTables			(label="Generate lifetime table", value=true)
 
-#@ String	other_options_message	(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Screening settings</p></html>", visibility="MESSAGE")
+#@ String	other_options_message	(value="<html><p style='font-size:12px; color:#3366cc; font-weight:bold'>Screening settings</p></html>", visibility="MESSAGE", required=false, persist=false)
 #@ Boolean	runScreen				(label="Activate screening: find hits and write the coordinates to a file", value=false)
-//#@ File	lif_file				(label = "Input .lif file (for stage coordinates and nuclei)", style="File", default="-")
+//#@ File	lif_file				(label="Input .lif file (for stage coordinates and nuclei)", style="File", default="-")
 #@ Double	stimulationSensitivity	(label="Sensitivity in detecting stimulation/calibration frames (#stdDevs of 2nd derivative)", value=1, min=0.0, style="format:0.0")
 #@ String	manualStimCalFrames		(label="Manual stimulation and calibration frames with (comma-separated - empty for automatic)", value="")
 //#@ Boolean	speedup				(label="Faster ROI processing", value=false)
 #@ Boolean	debugMode				(label="Debug mode", value=false)
 
+version = "0.9.5";
+
 print("\\Clear");
+print("FAST-HIPPOS, version "+version);
+print("=======================");
+
 if(additionalChannel == 0) additionalChannel = -1;
 speedup = false; //Faster ROI processing using BIOP labels to ROIs plugin, but messes up composite ROIs. Therefore set to false by default. 
 
@@ -477,17 +126,38 @@ confidence_interval_sigma = 2;
 createNormalizedKymograph = false;
 upSampleFactor = 1;
 lifetimeChannel = intensityChannel + 1;
-reanalyze_boolean = false;
+reapply_boolean = false;
+classifyCellsUsingAdditionalChannel = true;	//TO DO: add this as script parameter (?)
+
+//Labkit nuclei classifier parameters
+labkitNucleiChannel = 3;
+nucleiProbabilityErosionRadius = 2;
 
 //Cellpose parameters
 List.setCommands;
 if (List.get("Cellpose ...")!="") newCellposeWrapper = true;
 else if (List.get("Cellpose Advanced")!="") newCellposeWrapper = false;
 else exit("ERROR: Cellpose wrapper not found!");
+//Find Cellpose 3 env
 env_path = getPref("Packages.ch.epfl.biop.wrappers.cellpose.ij2commands.Cellpose", "env_path");
 env_type = getPref("Packages.ch.epfl.biop.wrappers.cellpose.ij2commands.Cellpose", "env_type");
-if(env_type == "<null>") env_type = "conda";	//Default is conda, but returns <null>
-print("Cellpose environment ("+env_type+") found at "+env_path);
+if(env_type == "<null>") env_type = "conda";	//Default is conda, but the default option returns <null>
+if(env_path != "") print("Cellpose3 environment ("+env_type+") found at "+env_path);
+//Find Cellpose 4 env
+env_path_cpsam = getPref("Packages.ch.epfl.biop.wrappers.cellpose.ij2commands.CellposeSAM", "env_path");
+env_type_cpsam = getPref("Packages.ch.epfl.biop.wrappers.cellpose.ij2commands.CellposeSAM", "env_type");
+if(env_type_cpsam == "<null>") env_type_cpsam = "conda";	//Default is conda, but the default option returns <null>
+if(env_path_cpsam != "") print("Cellpose4 environment ("+env_type_cpsam+") found at "+env_path_cpsam);
+
+if(env_path == "" && env_path_cpsam != "") {	//Only Cellpose4
+	env_type = env_type_cpsam;
+	env_path = env_path_cpsam;
+}
+if(env_path != "" && env_path_cpsam == "") {	//Only Cellpose3
+	env_type_cpsam = env_type;
+	env_path_cpsam = env_path;
+}
+if(env_path == "" && env_path_cpsam == "" && CellposeModel != "manual segmentation") exit("ERROR: No Cellpose environment found");
 
 output = output + File.separator;
 if(!File.exists(output)) {
@@ -505,7 +175,7 @@ var singleFrame = false;
 var nrHits;
 var baselineOnly = false;
 var calibrationOnly = false;
-maxNrHits = 1200;		//Maximum number of hits in a single .rgn file
+maxNrHits = 1000;
 
 hitList = "Hit List";
 var responseTimeStart = 0;				//Required for drawing hit finding region on graph
@@ -520,15 +190,12 @@ run("Conversions...", " ");
 run("CLIJ2 Macro Extensions", "cl_device=");
 Ext.CLIJ2_clear();
 
+//Close all Windows
 windowList = getList("window.titles");
 for(i=0; i<windowList.length; i++) {
 	selectWindow(windowList[i]);
-	run("Close");
+	if(windowList[i]!="Log") run("Close");
 }
-//close_windows("Hit");
-//close_windows("Cell_coordinates");
-//close_windows("Lifetime_Data");
-//close_windows("Cell_statistics");
 
 //Create dialog for screening. First load previous settings from disk.
 if(runScreen == true) {
@@ -582,26 +249,41 @@ if(runScreen == true) {
 	nrTilesX =										call("ij.Prefs.get", "nr.Tiles.X", 1);
 	nrTilesY =										call("ij.Prefs.get", "nr.Tiles.Y", 1);
 	tileOverlap =									call("ij.Prefs.get", "tile.Overlap", 0);
-	reanalyze_boolean =								call("ij.Prefs.get", "reanalyze.boolean", false);
+	reapply_boolean =								call("ij.Prefs.get", "reapply.boolean", false);
 	sort_hits_column =								call("ij.Prefs.get", "sort.hits.column", "");
 	sort_hits_direction = 							call("ij.Prefs.get", "sort.hits.direction", "highest first");
-	topNHits =										call("ij.Prefs.get", "top.N.Hits", 1000);
+//	topNHits =										call("ij.Prefs.get", "top.N.Hits", 1000);
 	generateRandomHits_boolean =					call("ij.Prefs.get", "generate.RandomHits.boolean", false);
 	nrOfRandomHits =								call("ij.Prefs.get", "nr.Of.Random.Hits", 0);
-
+	refinePositions_boolean =						call("ij.Prefs.get", "refine.Positions.boolean", false);
+	labkitClassifierFile =							call("ij.Prefs.get", "labkit.Classifier.File", getDirectory("plugins") + "Macros\\FAST-HIPPOS\\Labkit_FAST_HIPPOS_nuclei_classifier.txt");
+	optimizeStagePath_boolean =						call("ij.Prefs.get", "optimize.Stage.Path.boolean", true);
+	maxOptimizationTime =							call("ij.Prefs.get", "max.Optimization.Time", 5);
+	
 	Dialog.createNonBlocking("Settings for detecting hits in the screen.");
-	Dialog.addMessage("Response time is the time between stimulation and calibration (if any). 'Response difference' is the mean amplitude from the cell's baseline.\nDetect hits as (logical OR, sorting on the last selected item).");
-
-	Dialog.addCheckbox("Only re-analyze data (reads output files of already analyzed data from disk)", reanalyze_boolean);
+	Dialog.addCheckbox("Only re-apply screening settings (reads output files of already analyzed data from disk)", reapply_boolean);
+	
+	Dialog.addMessage("--- File settings ---", 14, "#663399");
+	
 	Dialog.addFile(".lif file for stage coordinates (if not found in stitched file)", lif_file);
+	Dialog.addNumber("Number of tiles X (overruled if found in metadata)", nrTilesX, 0, 4, "");
+	Dialog.addNumber("Number of tiles Y (overruled if found in metadata)", nrTilesY, 0, 4, "");
+	Dialog.addNumber("Tile overlap (%) (overruled if found in metadata)", tileOverlap, 1, 4, "");
 	Dialog.addMessage("Manual stimulation/calibration frames (comma-separated):");
 	Dialog.addString("     empty for automatic detection | '0' for baseline only mode", manualStimCalFrames, 25);
 	Dialog.addNumber("Sensitivity in detecting stimulation & calibration frames", stimulationSensitivity, 1, 3, "(# stdDevs)");
-	Dialog.addMessage("");
-	
-	Dialog.addMessage("Hit detection criteria:");
+	Dialog.addCheckbox("Generate random hits from the segmented cells", generateRandomHits_boolean);
+	Dialog.setInsets(-25, 00, 0);
+	Dialog.addNumber("", nrOfRandomHits, 0, 5, "(nr)");
 
-	Dialog.addRadioButtonGroup("    Logic", newArray("OR", "AND"), 1, 2, hit_find_logic);
+	Dialog.addMessage("");
+
+//	Dialog.addMessage("--------------------------------------------------------------------------------------------------------------------", 14, "#663399");
+	
+	Dialog.addMessage("--- Hit detection criteria ---", 14, "#663399");
+	Dialog.addMessage("'Response time' is the time between stimulation and calibration (if any).\n'Response difference' is the mean amplitude from the cell's baseline.", 12, "#663399");
+
+	Dialog.addRadioButtonGroup("   Logic", newArray("OR", "AND"), 1, 2, hit_find_logic);
 	
 	Dialog.setInsets(10, 20, 0);
 	Dialog.addCheckbox("baseline lifetime", hit_baseline_boolean);
@@ -613,7 +295,8 @@ if(runScreen == true) {
 	Dialog.setInsets(0, 20, 10);
 	Dialog.addCheckbox("", hit_avg_response_boolean);
 //	Dialog.addToSameRow();
-	Dialog.setInsets(-35, -298, 0);
+	Dialog.setInsets(-40, -298, 0);
+//	Dialog.setInsets(-40, -350, 0);
 	Dialog.addChoice("", newArray("mean absolute response lifetime", "mean response lifetime difference with baseline", "fraction of max response minus baseline"), absoluteOrRelativeOption);
 	Dialog.addToSameRow();
 	Dialog.addNumber("in a", hit_avg_response_time_window, 0, 3, "-frames window (-1 for full range)");
@@ -673,42 +356,48 @@ if(runScreen == true) {
 	Dialog.addCheckbox("(cell baseline - average baseline) is lower than", baseline_avg_baseline_difference_boolean);
 	Dialog.addToSameRow();	
 	Dialog.addNumber("", baseline_avg_baseline_difference_number, 2, 5, "ns");
-
-	Dialog.addMessage("--------------------------------------------------------------------------------------------------------------------");
-
-	Dialog.addNumber("Number of tiles X (overruled if found in metadata)", nrTilesX, 0, 4, "");
-	Dialog.addNumber("Number of tiles Y (overruled if found in metadata)", nrTilesY, 0, 4, "");
-	Dialog.addNumber("Tile overlap (%) (overruled if found in metadata)", tileOverlap, 1, 4, "");
-
-	Dialog.addMessage("Output options:");
+	Dialog.addMessage("");
+	
+	Dialog.addMessage("--- Output options ---", 14, "#663399");
 	Dialog.addChoice("Sort hits on criterium", newArray("mean baseline","mean response","max response","max response diff to avg baseline","rise time (frames)","rapid response ratio","mean additional channel intensity","do not sort"), sort_hits_column);
 	Dialog.addChoice("Sort direction", newArray("highest first", "lowest first"), sort_hits_direction);
 	Dialog.addNumber("        Generate .rgn files in chunks of ", maxNrHits, 0, 5, "hits");
-	Dialog.addNumber("        Generate an additional .rgn file with top ", topNHits, 0, 5, "hits");
+//	Dialog.addNumber("        Generate an additional .rgn file with top ", topNHits, 0, 5, "hits");
 
-	Dialog.addMessage("Curve fitting options:");
-	Dialog.addCheckbox("Fit traces (from stimulation to calibration, if present)", fit_traces);
-	Dialog.addString("Fit equation (max 5 parameters a,b,c,d,e)", fit_equation, 30);
-//	logistics curve: y = a + b/(1+exp(-d*(x-c)))
-//	initial guesses for logistics curve: 2.3, 0.7, 200*frameInterval, -0.01
+	Dialog.addCheckbox("Refine positions for nuclei, using Labkit classifier file", refinePositions_boolean);
+	Dialog.setInsets(-25, 00, 0);
+	Dialog.addFile("", labkitClassifierFile);
+
+	Dialog.addCheckbox("Optimize hit positions path, with max time per chunk", optimizeStagePath_boolean);
+	Dialog.setInsets(-25, 00, 0);
+	Dialog.addNumber("", maxOptimizationTime, 0, 5, "seconds");
+
+//	Dialog.addMessage("--- Curve fitting ---", 14, "#663399");
+//	Dialog.addCheckbox("Fit traces (from stimulation to calibration, if present)", fit_traces);
+//	Dialog.addString("Fit equation (max 5 parameters a,b,c,d,e)", fit_equation, 30);
+//	//logistics curve: y = a + b/(1+exp(-d*(x-c)))
+//	//initial guesses for logistics curve: 2.3, 0.7, 200*frameInterval, -0.01
 //	Dialog.addString("Fit equation (max 5 parameters a,b,c,d)", "y = a*exp(-(x)/(b*0.69315)) + c", 30);
-	Dialog.addString("Initial parameter guesses, separated by spaces (optional)", initialGuesses, 30);
+//	Dialog.addString("Initial parameter guesses, separated by spaces (optional)", initialGuesses, 30);
 
-	Dialog.addMessage("--------------------------------------------------------------------------------------------------------------------");
-
-	Dialog.addCheckbox("Do not screen. Instead generate random hits from the segmented cells (nr)", generateRandomHits_boolean);
-	Dialog.addToSameRow();
-	Dialog.addNumber("", nrOfRandomHits, 0, 5, "");
+//	Dialog.addMessage("--------------------------------------------------------------------------------------------------------------------", 14, "#663399");
 
 	Dialog.show();
 	
 	
-	reanalyze_boolean = Dialog.getCheckbox();
+	reapply_boolean = Dialog.getCheckbox();
 
 	lif_file = Dialog.getString();
 	lif_file = replace(lif_file, "\\", "/");
+	
+	nrTilesX = Dialog.getNumber();
+	nrTilesY = Dialog.getNumber();
+	tileOverlap = Dialog.getNumber()/100;
+
 	manualStimCalFrames = Dialog.getString();
 	stimulationSensitivity = Dialog.getNumber();
+	generateRandomHits_boolean = Dialog.getCheckbox();
+	nrOfRandomHits = Dialog.getNumber();
 
 	hit_find_logic = Dialog.getRadioButton();
 	
@@ -755,22 +444,21 @@ if(runScreen == true) {
 	baseline_calibration_difference_number_high = Dialog.getNumber();
 	baseline_avg_baseline_difference_boolean = Dialog.getCheckbox();
 	baseline_avg_baseline_difference_number = Dialog.getNumber();
-
-	nrTilesX = Dialog.getNumber();
-	nrTilesY = Dialog.getNumber();
-	tileOverlap = Dialog.getNumber()/100;
 	
 	sort_hits_column = Dialog.getChoice();
 	sort_hits_direction = Dialog.getChoice();
 	maxNrHits = Dialog.getNumber();
-	topNHits = Dialog.getNumber();
-	
-	fit_traces = Dialog.getCheckbox();
-	fit_equation = Dialog.getString();
-	initialGuesses = Dialog.getString();
-	generateRandomHits_boolean = Dialog.getCheckbox();
-	nrOfRandomHits = Dialog.getNumber();
+//	topNHits = Dialog.getNumber();
 
+	refinePositions_boolean = Dialog.getCheckbox();
+	labkitClassifierFile = Dialog.getString();
+	
+	optimizeStagePath_boolean = Dialog.getCheckbox();
+	maxOptimizationTime = Dialog.getNumber();
+
+//	fit_traces = Dialog.getCheckbox();
+//	fit_equation = Dialog.getString();
+//	initialGuesses = Dialog.getString();
 
 	//Set Prefs
 	call("ij.Prefs.set", "lifFile.Path", lif_file);
@@ -817,16 +505,22 @@ if(runScreen == true) {
 	call("ij.Prefs.set", "nr.Tiles.X", nrTilesX);
 	call("ij.Prefs.set", "nr.Tiles.Y", nrTilesY);
 	call("ij.Prefs.set", "tile.Overlap", tileOverlap);
-	call("ij.Prefs.set", "reanalyze.boolean", reanalyze_boolean);
+	call("ij.Prefs.set", "reapply.boolean", reapply_boolean);
 	call("ij.Prefs.set", "sort.hits.column", sort_hits_column);
 	call("ij.Prefs.set", "sort.hits.direction", sort_hits_direction);
-	call("ij.Prefs.set", "top.N.Hits", topNHits);
+//	call("ij.Prefs.set", "top.N.Hits", topNHits);
 	call("ij.Prefs.set", "generate.RandomHits.boolean", generateRandomHits_boolean);
 	call("ij.Prefs.set", "nr.Of.Random.Hits", nrOfRandomHits);
+	call("ij.Prefs.set", "refine.Positions.boolean", refinePositions_boolean);
+	call("ij.Prefs.set", "labkit.Classifier.File", labkitClassifierFile);
+	call("ij.Prefs.set", "optimize.Stage.Path.boolean", optimizeStagePath_boolean);
+	call("ij.Prefs.set", "max.Optimization.Time", maxOptimizationTime);
 
 	setScriptParameterValue("stimulationSensitivity", stimulationSensitivity);
 	setScriptParameterValue("manualStimCalFrames", manualStimCalFrames);
 
+	maxOptimizationTime = maxOptimizationTime*1000;	//convert ms to seconds
+	
 	if(!matches(fit_equation, ".*b.*")) nrFitParameters = 1;
 	else if(!matches(fit_equation, ".*c.*")) nrFitParameters = 2;
 	else if(!matches(fit_equation, ".*d.*")) nrFitParameters = 3;
@@ -860,7 +554,7 @@ if(runScreen == true && file_list.length>1) {
 	//Get stage coordinates of all the tiles. N.B. Counting always starts at the first tile in the .lif file.
 	oldLogWindow = getInfo("log");
 	print("\\Clear");
-	run("NKI get stage coordinates to log window", "file=["+lif_file+"], nrtiles="+file_list.length);	//Run a Jython script to print the stage coordinates to the log window
+	run("Get stage coordinates to log window", "file=["+lif_file+"], nrtiles="+file_list.length);	//Run a Jython script to print the stage coordinates to the log window
 	logWindow = getInfo("log");
 	stagePositions = split(logWindow, "\n");
 	print("\\Clear");
@@ -874,7 +568,7 @@ print(file_list.length + " files/tiles to analyze.");
 alreadySegmented = false;
 if(file_list.length == 1) segmentFirstAnalyzeLater = false;
 for (f = 0; f < file_list.length; f++) {
-	if (microscope == "Confocal TCSPC / TauSeparation" || microscope == "TauContrast") {
+	if (microscope == "Fitted TCSPC data / TauSeparation" || microscope == "TauContrast") {
 		run("Bio-Formats Macro Extensions");
 		Ext.setId(file_list[f]);
 		Ext.getSeriesCount(nr_series);
@@ -919,11 +613,11 @@ for (f = 0; f < file_list.length; f++) {
 		Ext.CLIJ2_clear();	
 
 		//open the image
-		if(reanalyze_boolean == false) {
+		if(reapply_boolean == false) {
 			if(segmentFirstAnalyzeLater == false || alreadySegmented == true) {
 	//			!!WARNING!! Fitted TCSPC .tif images exported from LAS X are saved with unit 'pixels'. Bio-Formats then ignores the pixel calibration! Using the standard ImageJ opener below is a workaround, but it doesn't work for multiseries files.
-	//			if (microscope == "Confocal TCSPC / TauSeparation") run("Bio-Formats Importer", "open=["+file_list[f]+"] color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT series_"+s+1);
-				if (microscope == "Confocal TCSPC / TauSeparation") {
+	//			if (microscope == "Fitted TCSPC data / TauSeparation") run("Bio-Formats Importer", "open=["+file_list[f]+"] color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT series_"+s+1);
+				if (microscope == "Fitted TCSPC data / TauSeparation") {
 					if(substring(file_list[f], lastIndexOf(file_list[f], ".")+1) == "tif") open(file_list[f]);
 					else run("Bio-Formats Importer", "open=["+file_list[f]+"] color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT series_"+s+1);
 				}
@@ -931,7 +625,10 @@ for (f = 0; f < file_list.length; f++) {
 				else if (microscope == "Fast FLIM") open(file_list[f]);
 				else if (microscope == "Frequency Domain FLIM") openfli(file_list[f], saveName);
 				else if (microscope == "Ratio Imaging") open(file_list[f]);
-				else if (microscope == "Intensity only") open(file_list[f]);
+				else if (microscope == "Intensity only") {
+					if(substring(file_list[f], lastIndexOf(file_list[f], ".")+1) == "tif") open(file_list[f]);
+					else run("Bio-Formats Importer", "open=["+file_list[f]+"] color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT series_"+s+1);
+				}
 			}
 			setBatchMode("show");
 			//Run this only once if segmentFirstAnalyzeLater == true
@@ -993,12 +690,19 @@ for (f = 0; f < file_list.length; f++) {
 		*/
 			selectWindow(input_image);
 			getDimensions(width, height, channels, slices, frames);
-			if(frames == 1) singleFrame == true;
-			
+			if(frames == 1 && runScreen == false) singleFrame == true;
+			else if (frames == 1 && runScreen == true) {	//Duplicate the image to create a fake time-lapse (required for screening)
+				input_image = getTitle();
+				run("Duplicate...", "title=secondFrame  duplicate");
+				run("Concatenate...", "  title=["+input_image+"] image1=["+input_image+"] image2=secondFrame");
+				//run("Re-order Hyperstack ...", "channels=[Channels (c)] slices=[Frames (t)] frames=[Slices (z)]");
+				setBatchMode("show");
+			}
+			getDimensions(width, height, channels, slices, frames);
 			frameInterval = Stack.getFrameInterval();
 			if(frameInterval != 0) print("Frame Interval detected: "+frameInterval+" s");
 			else {
-				print("WARNING: Frame Interval not found! Using manual value of "+default_frameInterval+" s.");
+				print("[WARNING] Frame Interval not found! Using manual value of "+default_frameInterval+" s.");
 				frameInterval = default_frameInterval; 
 			}
 
@@ -1012,7 +716,7 @@ for (f = 0; f < file_list.length; f++) {
 			}
 			
 			//Retrieve the intensity and lifetime stacks using the correct modality
-			if(microscope == "Confocal TCSPC / TauSeparation") lifetime_and_intensity_stacks = calculate_lifetime_and_intensity_TCSPC(input_image);
+			if(microscope == "Fitted TCSPC data / TauSeparation") lifetime_and_intensity_stacks = calculate_lifetime_and_intensity_TCSPC(input_image);
 			else if(microscope == "TauContrast") lifetime_and_intensity_stacks = calculate_lifetime_and_intensity_TauContrast(input_image);
 			else if(microscope == "FAST FLIM") lifetime_and_intensity_stacks = calculate_lifetime_and_intensity_FASTFLIM(input_image);
 			else if(microscope == "Frequency Domain FLIM") lifetime_and_intensity_stacks = calculate_lifetime_and_intensity_FDFLIM(input_image);
@@ -1044,13 +748,13 @@ for (f = 0; f < file_list.length; f++) {
 				rename(intensity_stack);
 				setBatchMode("show");
 			}
-
 			//Segment the cells
 			if(alreadySegmented == false) {
 				if(CellposeModel != "manual segmentation") {
 					if(nucleiChannel != -1) labelmaps = segment_cells(intensity_stack_for_segmentation, nuclei_stack);
 					else labelmaps = segment_cells_no_nuclei(intensity_stack_for_segmentation);
 					labelmap_cells = labelmaps[0];
+					selectImage(labelmap_cells);
 					nr_cells = getValue("Max");
 					if(nucleiChannel != -1) labelmap_nuclei = labelmaps[1];
 				}
@@ -1062,7 +766,6 @@ for (f = 0; f < file_list.length; f++) {
 					else setMinAndMax(0, 255);
 				}
 			}
-
 			//Save all labelmaps if segmentFirstAnalyzeLater == true and break out of the loop
 			if(segmentFirstAnalyzeLater == true && alreadySegmented == false) {
 				File.makeDirectory(output+"labelmaps");
@@ -1096,14 +799,14 @@ for (f = 0; f < file_list.length; f++) {
 //				lifetime_stack = getTitle();
 //				setBatchMode("show");
 			}
-			
+	
 			if(nr_cells == 0) {
-				print("No cells found in this image!");
+				print("[WARNING] No cells found in this image!");
 				s++;
-				break;
+				continue;
 			}
 			//Overlay labelmap with intensity image
-			selectWindow("intensity_image_for_Cellpose");
+			selectImage("intensity_image_for_Cellpose");
 			run("Add Image...", "image="+labelmap_cells+" x=0 y=0 opacity=33 zero");
 
 			//Measure the lifetime traces
@@ -1117,8 +820,9 @@ for (f = 0; f < file_list.length; f++) {
 			if(additionalChannel > 0) {
 				additionalChannelInfo = measure_intensity_in_additional_channel(input_image, additionalChannel);
 				kymograph_additionalChannel = additionalChannelInfo[0];
-				additionalChannelMaxIntensity = additionalChannelInfo[1];
-				if(createScatterPlots == true) scatterPlotAdditional = makeScatterPlot2D(kymograph, kymograph_additionalChannel, additionalChannelMaxIntensity, saveName, nr_cells);
+				additionalChannelMinIntensity = additionalChannelInfo[1];
+				additionalChannelMaxIntensity = additionalChannelInfo[2];
+				if(createScatterPlots == true) scatterPlotAdditional = makeScatterPlot2D(kymograph, kymograph_additionalChannel, additionalChannelMinIntensity, additionalChannelMaxIntensity, saveName, nr_cells, true);
 			}
 			
 			if(nucleiChannel != -1) labelmap_reassigned_nuclei_and_empty_cells = assign_nuclei_to_cells(labelmap_cells, labelmap_nuclei);
@@ -1135,11 +839,11 @@ for (f = 0; f < file_list.length; f++) {
 			}
 			
 			if(createScatterPlots == true) {
-				scatterPlotIntensity = makeScatterPlot(kymograph, "Cell_statistics", "MEAN_INTENSITY", saveName, nr_cells);
-				scatterPlotArea = makeScatterPlot(kymograph, "Cell_statistics", "PIXEL_COUNT", saveName, nr_cells);
+				scatterPlotIntensity = makeScatterPlot(kymograph, "Cell_statistics", "MEAN_INTENSITY", saveName, nr_cells, true);
+				scatterPlotArea = makeScatterPlot(kymograph, "Cell_statistics", "PIXEL_COUNT", saveName, nr_cells, false);
 			}
 		}
-		else if(reanalyze_boolean == true) {
+		else if(reapply_boolean == true) {
 			if(seriesName != File.getName(file_list[f])) {
 				saveName = File.getNameWithoutExtension(file_list[f]) + " - " + seriesName;
 			}
@@ -1188,8 +892,16 @@ for (f = 0; f < file_list.length; f++) {
 					open(inputDir + kymograph_additionalChannel);
 					setBatchMode("show");
 				}
+				additionalChannelMaxIntensity = getValue("Max");
+				additionalChannelMinIntensity = getValue("Min");
 			}
-			
+
+			intensity_image = saveName + " (intensity & labelmap).tif";
+			if(File.exists(inputDir + intensity_image)) open(inputDir + intensity_image);
+			run("32-bit");
+			rename("intensity");
+			setBatchMode("show");
+
 			RGB_overlay = saveName + " (lifetime & intensity RGB overlay).tif";
 			if(createRGBOverlay) open(inputDir + RGB_overlay);
 //			getDimensions(width, height, channels, slices, frames);
@@ -1219,8 +931,16 @@ for (f = 0; f < file_list.length; f++) {
 			if(File.exists(inputDir + scatterPlotArea)) {
 				open(inputDir + scatterPlotArea);
 				setBatchMode("show");
-			}	
-				
+			}
+			
+			if(additionalChannel > 0) {
+				scatterPlotAdditional = saveName + " (scatterplot ch"+additionalChannel+").tif";
+				if(File.exists(inputDir + scatterPlotAdditional)) {
+					open(inputDir + scatterPlotAdditional);
+					setBatchMode("show");
+				}
+			}
+
 			plot = saveName + " (lifetime traces plot).tif";
 			if(File.exists(inputDir + plot)) {
 				open(inputDir + plot);
@@ -1247,7 +967,7 @@ for (f = 0; f < file_list.length; f++) {
 
 		//Find hits in a screen
 		if(runScreen == true) {
-			if(reanalyze_boolean == false) selectWindow(input_image);
+			if(reapply_boolean == false) selectWindow(input_image);
 			else selectWindow(labelmap_cells);
 			metadata = split(getImageInfo(), "\n");
 			nrTilesX = 1;
@@ -1265,7 +985,7 @@ for (f = 0; f < file_list.length; f++) {
 				oldLogWindow = getInfo("log");
 				print("\\Clear");
 				tiles = 1;
-				run("NKI get stage coordinates to log window", "file=["+lif_file+"], nrtiles="+tiles);	//Run a Jython script to print the stage coordinates to the log window
+				run("Get stage coordinates to log window", "file=["+lif_file+"], nrtiles="+tiles);	//Run a Jython script to print the stage coordinates to the log window
 				logWindow = getInfo("log");
 				print("\\Clear");
 				print(oldLogWindow);
@@ -1305,20 +1025,22 @@ for (f = 0; f < file_list.length; f++) {
 			}
 			if(additionalChannel == -1) kymograph_additionalChannel = "";
 			if(tileOverlap >= 0) {
-				if(nucleiChannel != -1) hitList = find_hits(lifetimeTable, labelmap_reassigned_nuclei_and_empty_cells, kymograph, f);
-				else hitList = find_hits(labelmap_cells, kymograph, kymograph_additionalChannel, f);
+				if(nucleiChannel != -1) find_hits_results = find_hits(labelmap_reassigned_nuclei_and_empty_cells, kymograph, kymograph_additionalChannel, f);
+				else find_hits_results = find_hits(labelmap_cells, kymograph, kymograph_additionalChannel, f);
 			}
 			else if(tileOverlap < 0 && file_list.length == 1) {
-				if(nucleiChannel != -1) hitList = find_hits(lifetimeTable, labelmap_reassigned_nuclei_and_empty_cells, kymograph, nrTilesX-1);	//Send the upper leftmost tile. Scanning with overlap < 0 goes from right to left.
-				else hitList = find_hits(labelmap_cells, kymograph, kymograph_additionalChannel, nrTilesX-1);		
+				if(nucleiChannel != -1) find_hits_results = find_hits(labelmap_reassigned_nuclei_and_empty_cells, kymograph, kymograph_additionalChannel, nrTilesX-1);	//Send the upper leftmost tile. Scanning with overlap < 0 goes from right to left.
+				else find_hits_results = find_hits(labelmap_cells, kymograph, kymograph_additionalChannel, nrTilesX-1);		
 			}
-
+			hitList = find_hits_results[0];
+			cellCoordinatesTable = find_hits_results[1];
+			
 			if(createRGBOverlay == true && singleFrame == false) color_hits_on_RGB_overlay(RGB_overlay, hitList, "white", f);
 			else if(singleFrame == true) color_hits_on_RGB_overlay(input_image, hitList, "white", f);
 			if(singleFrame == false && smoothRadiusTraces == 0) plot_hit_timetraces(kymograph, hitList, f, saveName, nr_cells);
 			else if(singleFrame == false && smoothRadiusTraces > 0) plot_hit_timetraces(kymograph_smoothed, hitList, f, saveName, nr_cells);
 			if(singleFrame == false && createNormalizedKymograph == true) plot_normalized_timetraces(kymograph+"_baseline_normalized", saveName, nr_cells);		
-			if(createHistogram == true && nrHits>0) {
+			if(createHistogram == true && nrHits>0 && nrHits<nr_cells) {
 				hit_cell_IDs = Table.getColumn("Cell", hitList);
 				selectWindow(kymograph);
 				getDimensions(kwidth, kheight, kchannels, kslices, kframes);
@@ -1367,11 +1089,25 @@ for (f = 0; f < file_list.length; f++) {
 				lifetimesHistogramNonHits = histograms[0];
 				densityPlotNonHits = histograms[1];
 			}
+			if(additionalChannel != -1) {
+               	makeScatterPlot2D_Hits(kymograph, kymograph_additionalChannel, additionalChannelMinIntensity, additionalChannelMaxIntensity, saveName, nr_cells, true, hit_cell_IDs, cellCoordinatesTable);
+				for(i=0; i<hit_cell_IDs.length; i++) {
+					value = Table.get("ch"+additionalChannel+" intensity", hit_cell_IDs[i]-1, cellCoordinatesTable);
+					class = Table.get("Class", hit_cell_IDs[i]-1, cellCoordinatesTable);
+					Table.set("ch"+additionalChannel+" intensity", i, value, hitList);
+					Table.set("Class", i, class, hitList);
+				}
+				Table.update;
+				positiveHitsArray = Table.getColumn("Class", hitList);
+				nrPositiveHits = sumArray(positiveHitsArray);
+				print("Nr of positive hits : "+nrPositiveHits+" ("+d2s(nrPositiveHits/nrHits*100,1)+" % of all hits)");
+
+			}
 		}
 
 		//Save images and data tables
 		run("Set Measurements...", "mean redirect=None decimal=9");	//Make sure that enough decimals are saved!
-		if(reanalyze_boolean == false) {	//Don't save these when re-analyzing
+		if(reapply_boolean == false) {	//Don't save these when re-analyzing
 			selectWindow(lifetime_stack);
 			saveAs("tiff", output + saveName + " (weighted lifetime)");
 
@@ -1420,7 +1156,7 @@ for (f = 0; f < file_list.length; f++) {
 				saveAs("tiff", output + lifetimesHistogram);
 				selectWindow(densityPlot);
 				saveAs("tiff", output + densityPlot);
-				if(runScreen == true && nrHits > 0) {
+				if(runScreen == true && nrHits > 0 && nrHits<nr_cells) {
 					selectWindow(lifetimesHistogramHits);
 					saveAs("tiff", output + saveName + lifetimesHistogramHits);
 					selectWindow(lifetimesHistogramNonHits);
@@ -1456,15 +1192,18 @@ for (f = 0; f < file_list.length; f++) {
 				File.close(stagePositionsFile);
 	
 				selectWindow("Cell_coordinates");
+				Table.rename("Cell_coordinates","Cell_coordinates.tsv");
 				Table.save(output + "Cell_coordinates.tsv");
 			}
 		}
 		Ext.CLIJ2_clear();
 	}
 }
+Table.update;
+
 
 //Create .rgn files in chucks of 'maxNrHits' events.
-if(runScreen == true) {
+if(runScreen == true && nr_cells>0) {
 //	outputName = File.getNameWithoutExtension(lif_file);
 	outputName = saveName;
 	selectWindow(hitList);
@@ -1473,6 +1212,9 @@ if(runScreen == true) {
 	Table.update;
 
 	generate_rgn_file(outputName, hitList);
+	
+	hitlists_to_plot = "";
+	plot_legend = "";
 	if(Table.size > 0) {
 		nrHits = Table.size;
 		n = 0;
@@ -1480,34 +1222,43 @@ if(runScreen == true) {
 			showStatus("Creating Hit tables...");
 			showProgress(n, nrHits);
 			open(output + outputName + " (Hit list).tsv");	//re-open file to generate the top N hits table (couldn't find a command to duplicate the table)
-			currentHitListName = outputName + " (Hit list "+n+"-"+n+minOf(maxNrHits, nrHits)-1+").tsv";
+			hitListRange = ""+n+1+"-"+n+minOf(maxNrHits, nrHits-n);
+			currentHitListName = outputName + " (Hit list "+hitListRange+").tsv";
 			Table.deleteRows(n+maxNrHits, nrHits);
 			Table.update;
 			Table.deleteRows(0, n-1);
 			Table.update;
+			currentNrHits = Table.size;
 			Table.rename(outputName + " (Hit list).tsv", currentHitListName);
+			if(optimizeStagePath_boolean == true) {
+				pathOrder = optimizePath(currentHitListName, currentNrHits, maxOptimizationTime);
+// TO DO: STORE THE OPTIMZIZED PATHORDER IN THE REGION FILE (?)
+			}
 			Table.save(output + currentHitListName);
-			generate_rgn_file(outputName + "_" +n+"-"+n+minOf(maxNrHits, nrHits)-1, currentHitListName);
-			close(currentHitListName);
+			generate_rgn_file(outputName + "_" +hitListRange, currentHitListName);
+//			close(currentHitListName);
+			hitlists_to_plot += currentHitListName + ",";
+			plot_legend += "Hits " + hitListRange + "\t";
 			n += maxNrHits;
 		}
-	}
-}
-
-//Create top-N hits .rgn file
-if(runScreen == true) {
-//	outputName = File.getNameWithoutExtension(lif_file);
-	selectWindow(hitList);
-	if(Table.size > 0) {
-		open(output + outputName + " (Hit list).tsv");	//re-open file to generate the top N hits table (couldn't find a command to duplicate the table)
-		topHitList = outputName + " (Top "+topNHits+" Hit list).tsv";
-		Table.deleteRows(topNHits, Table.size);
-		Table.update;
-		Table.rename(outputName + " (Hit list).tsv", topHitList);
-		Table.save(output + outputName + " (Top "+topNHits+" Hit list).tsv");
-		generate_rgn_file(outputName + "_TOP_"+topNHits+"_", topHitList);
-		plot_hit_locations(hitList, topHitList, tiles);
-		saveAs("tiff", output + saveName + " (hit positions)");
+/*		
+		//Create top-N hits .rgn file
+		if(runScreen == true && nr_cells>0) {
+		//	outputName = File.getNameWithoutExtension(lif_file);
+			selectWindow(hitList);
+			if(Table.size > 0) {
+				open(output + outputName + " (Hit list).tsv");	//re-open file to generate the top N hits table (couldn't find a command to duplicate the table)
+				topHitList = outputName + " (Top "+topNHits+" Hit list).tsv";
+				Table.deleteRows(topNHits, Table.size);
+				Table.update;
+				Table.rename(outputName + " (Hit list).tsv", topHitList);
+				Table.save(output + outputName + " (Top "+topNHits+" Hit list).tsv");
+				generate_rgn_file(outputName + "_TOP_"+topNHits+"_", topHitList);
+				saveAs("tiff", output + saveName + " (hit positions)");
+			}
+		}
+*/		
+		plot_hit_locations(hitlists_to_plot, plot_legend, tiles);
 	}
 }
 
@@ -1520,7 +1271,284 @@ print("Done without errors");
 /////////////////////// END /////////////////////////
 
 
+function optimizePath(currentHitListName, nrHits, maxOptimizationTime) {
+	currentHitListName = getInfo("window.title");
+	//print(currentHitListName);
+	xArr = Table.getColumn("AbsPosX (m)", currentHitListName);
+	yArr = Table.getColumn("AbsPosY (m)", currentHitListName);
+	
+	n_closest_distances = "n_closest_distances";
+	n_closest_distances_indices = "n_closest_distances_indices";
+	distance_matrix = "distance_matrix";
+	maxPathOptimizationIterations = 1000;
+	numberOfNeigbors = 100;		// knn calculated beforehand
+	distanceThreshold = 1E-5;	// in meters, only calculate swap segments if the distance is larger than the threshold
 
+	Ext.CLIJ2_pushArray(xArrGPU, xArr, nrHits, 1, 1);
+	Ext.CLIJ2_pushArray(yArrGPU, yArr, nrHits, 1, 1);
+	Ext.CLIJ2_combineVertically(xArrGPU, yArrGPU, pointlist);
+
+	Ext.CLIJ2_generateDistanceMatrix(pointlist, pointlist, distance_matrix_pluszero);
+	Ext.CLIJ2_crop2D(distance_matrix_pluszero, distance_matrix, 1, 1, nrHits, nrHits);
+	Ext.CLIJ2_pull(distance_matrix);
+	
+	Ext.CLIJ2_nClosestDistances(distance_matrix, n_closest_distances, n_closest_distances_indices, numberOfNeigbors);
+	Ext.CLIJ2_pull(n_closest_distances_indices);
+	run("Rotate 90 Degrees Left");
+	run("Flip Vertically");
+	
+	pathOrder = newArray(nrHits);
+	unvisitedPoints = Array.getSequence(nrHits);		
+	totalDistance = 0;
+	
+	// Start from a corner point
+	distanceToZero = newArray(nrHits);
+	for (i = 0; i < nrHits; i++) {
+		distanceToZero[i] = Math.pow(xArr[i],2) + Math.pow(yArr[i],2);	//Taking the square root is unnecessary
+	}
+	currentPoint = minIndexOfArray(distanceToZero);
+	pathOrder[0] = currentPoint;
+	unvisitedPoints = Array.delete(unvisitedPoints, currentPoint);
+	
+	// Path construction using n-nearest neighbors
+	for (step = 1; step < nrHits; step++) {
+	    bestNextPoint = -1;
+	    bestDistance = 1/0;
+	    
+	    // Directly use n-nearest neighbors for the current point
+	    selectImage(n_closest_distances_indices);
+	    makeRectangle(1, currentPoint, numberOfNeigbors-1, 1);
+	    nNearestNeighbors = getProfile();
+	
+	    // Only consider unvisited points among the n-nearest neighbors
+	    selectImage(distance_matrix);
+	    for (i = 0; i < nNearestNeighbors.length; i++) {
+	        candidatePoint = nNearestNeighbors[i];
+	
+	        // Check if the candidate point is still unvisited
+	        if (occursInArray(unvisitedPoints, candidatePoint)) {
+	            distance = getPixel(currentPoint,candidatePoint);
+	            //print(currentPoint + " to "+candidatePoint+", distance = "+distance);
+	            bestDistance = distance;
+	            bestNextPoint = candidatePoint;
+	            break;
+	        }
+	    }
+	    
+	    // Fallback: if no unvisited neighbor found, choose from all unvisited points
+	    if (bestNextPoint == -1) {
+	    	//print(currentPoint+" : no unvisited neighbor found. "+unvisitedPoints.length+" points left.");
+	        for (i = 0; i < unvisitedPoints.length; i++) {
+	            candidatePoint = unvisitedPoints[i];
+	            distance = getPixel(currentPoint,candidatePoint);
+	            if (distance < bestDistance) {
+	                bestDistance = distance;
+	                bestNextPoint = candidatePoint;
+	            }
+	        }
+	    }
+	    
+	    // Update path and current state
+	    pathOrder[step] = bestNextPoint;
+	    currentPoint = bestNextPoint;
+	    totalDistance += bestDistance;
+	    unvisitedPoints = Array.delete(unvisitedPoints, bestNextPoint);
+	}
+
+	// Optimize path using 2-opt 
+	startTime = getTime();
+	pathOrder = twoOptOptimization_sorted_and_compare(pathOrder, distance_matrix, maxPathOptimizationIterations, maxOptimizationTime, distanceThreshold);
+
+	// Recalculate total distance after optimization
+	selectImage(distance_matrix);
+	totalDistanceNN = totalDistance;
+	totalDistance = 0;
+	for (i = 0; i < pathOrder.length - 1; i++) {
+		totalDistance += getPixel(pathOrder[i], pathOrder[i+1]);
+	}
+	print("Path optimization took "+getTime()-startTime+" ms, leading to a "+d2s((1-totalDistance/totalDistanceNN)*100,1)+"% shorter path (compared to nearest neighbors).");
+
+	pathX = newArray(nrHits);
+	pathY = newArray(nrHits);
+	for (i = 0; i < nrHits; i++) {
+		pathX[i] = xArr[pathOrder[i]];
+		pathY[i] = yArr[pathOrder[i]];
+	}
+
+	// Overwrite table columns
+	Table.setColumn("AbsPosX (m)", pathX, currentHitListName);
+	Table.setColumn("AbsPosY (m)", pathY, currentHitListName);
+	Table.update;
+
+/*
+	Plot.create("Plot", "X", "Y");
+	Plot.setFrameSize(600, 600);
+	Plot.setLineWidth(1);
+	Plot.add("line", pathX, pathY);
+	Plot.setStyle(0, "blue,#a0a0ff,1.5,Connected Circles");
+	Plot.setLimitsToFit();
+	Plot.show();
+	setBatchMode("show");
+*/
+	close(distance_matrix);
+	close(n_closest_distances_indices);
+	
+	return pathOrder;
+}
+
+
+
+// Optimize positions by swapping segments and comparing - NOT USED
+//function twoOptOptimization(pathOrder, distance_matrix, maxIterations, maxOptimizationTime, distanceThreshold) {
+//    improved = true;
+//    iterations = 0;
+//    
+//    selectImage(distance_matrix);
+//    startTime = getTime();
+//    while (improved && iterations < maxIterations) {
+//        processedTime = getTime() - startTime;
+//        if(processedTime > maxOptimizationTime) break;
+//		improved = false;
+//		showStatus("Optimizing path between "+pathOrder.length+" positions...");
+//		showProgress(processedTime, maxOptimizationTime);
+//        for (i = 0; i < pathOrder.length - 2; i++) {
+//            for (j = i + 2; j < pathOrder.length - 1; j++) {
+//                currentDistance = getPixel(pathOrder[i], pathOrder[i+1]) + getPixel(pathOrder[j], pathOrder[j+1]);	// Calculate current path segments
+//                swappedDistance = getPixel(pathOrder[i], pathOrder[j]) + getPixel(pathOrder[i+1], pathOrder[j+1]);	// Calculate potential new path segments
+//
+//                if (currentDistance > distanceThreshold && swappedDistance < currentDistance) {							// If the current distance is larger than the threshold and the new path is shorter
+//                	//print("swapping segments "+pathOrder[i]+"-"+pathOrder[i+1]+" and "+pathOrder[j]+"-"+pathOrder[j+1]);
+//                    // Create segments
+//                    prefix = Array.slice(pathOrder, 0, i+1);
+//                    reversedSegment = Array.slice(pathOrder, i+1, j+1);
+//                    suffix = Array.slice(pathOrder, j+1, pathOrder.length);
+//                    
+//                    // Reverse the middle segment
+//                    Array.reverse(reversedSegment);
+//                    
+//                    // Reconstruct the path
+//                    pathOrder = Array.concat(prefix, reversedSegment, suffix);
+//                    
+//                    improved = true;
+//                    break;
+//                }
+//            }
+//            if (improved) break;
+//        }
+//        iterations++;
+//    }
+//    print("Optimization iterations: "+iterations);
+//    return pathOrder;
+//}
+
+
+// Optimize positions by swapping segments and comparing, starting with largest segments
+function twoOptOptimization_sorted_and_compare(pathOrder, distance_matrix, maxIterations, maxOptimizationTime, distanceThreshold) {
+    improved = true;
+    iterations = 0;
+    totalImprovement = 0;
+    swaps = 0;
+    
+    selectImage(distance_matrix);
+    startTime = getTime();
+    
+    // Calculate initial segment lengths
+    segmentLengths = newArray(pathOrder.length - 1);
+    for (i = 0; i < pathOrder.length - 1; i++) {
+        segmentLengths[i] = getPixel(pathOrder[i], pathOrder[i+1]);
+    }
+    
+    // Sort segment indices by length (descending)
+    sortedSegmentIndices = Array.rankPositions(segmentLengths);
+    Array.reverse(sortedSegmentIndices);
+
+    while (improved && iterations < maxIterations) {
+        processedTime = getTime() - startTime;
+        if(processedTime > maxOptimizationTime) break;
+        
+        improved = false;
+        showStatus("Optimizing path between "+pathOrder.length+" positions, iteration "+iterations+" ("+d2s((maxOptimizationTime - processedTime)/1000,1)+") s");
+        showProgress(processedTime, maxOptimizationTime);
+        
+        // Iterate through segments from longest to shortest
+        for (k = 0; k < sortedSegmentIndices.length; k++) {
+            i = sortedSegmentIndices[k];
+
+            // Find the best segment to swap with
+            bestSwapIndex = -1;
+            bestImprovement = 0;
+            
+            for (j = 0; j < pathOrder.length - 1; j++) {
+                if (i == j || Math.abs(i - j) < 2) continue;  // Skip same segment and adjacent segments
+                
+                currentDistance = getPixel(pathOrder[i], pathOrder[i+1]) + getPixel(pathOrder[j], pathOrder[j+1]);
+                if(currentDistance < distanceThreshold) continue;	// Don't process further if the distance is already small
+                swappedDistance = getPixel(pathOrder[i], pathOrder[j]) + getPixel(pathOrder[i+1], pathOrder[j+1]);
+                
+                improvement = currentDistance - swappedDistance;
+
+                // Find the best potential swap that meets the criteria
+                if (improvement > bestImprovement) {
+                    bestSwapIndex = j;
+                    bestImprovement = improvement;
+                }
+            }
+            
+            // Perform the best swap if found
+            if (bestSwapIndex != -1) {
+                j = bestSwapIndex;
+                
+                // Ensure i is the smaller index, j the larger
+                start = minOf(i, j);
+                end = maxOf(i, j);
+
+            // Print segment details before swap
+//            print("Swapping segments:");
+//            print("  Segment 1: index " + start + ", length " + segmentLengths[start]);
+//            print("  Segment 2: index " + end + ", length " + segmentLengths[end]);
+//            print("  Current distance: " + getPixel(pathOrder[start], pathOrder[start+1]) + " + " + getPixel(pathOrder[end], pathOrder[end+1]));
+//            print("  Swapped distance: " + getPixel(pathOrder[start], pathOrder[end]) + " + " + getPixel(pathOrder[start+1], pathOrder[end+1]));
+//            print("  Improvement: " + bestImprovement);
+                
+                // Create segments
+                prefix = Array.slice(pathOrder, 0, start+1);
+                reversedSegment = Array.slice(pathOrder, start+1, end+1);
+                suffix = Array.slice(pathOrder, end+1, pathOrder.length);
+                
+                // Reverse the middle segment
+                Array.reverse(reversedSegment);
+                
+                // Reconstruct the path
+                pathOrder = Array.concat(prefix, reversedSegment, suffix);
+
+                // Update total improvement
+                totalImprovement += bestImprovement;
+                
+                // Recalculate segment lengths
+                for (l = 0; l < pathOrder.length - 1; l++) {
+                    segmentLengths[l] = getPixel(pathOrder[l], pathOrder[l+1]);
+                }                
+                // Re-sort segment indices
+                sortedSegmentIndices = Array.rankPositions(segmentLengths);
+                Array.reverse(sortedSegmentIndices);
+                
+                improved = true;
+                swaps++;
+                break;
+            }
+        }
+        
+        iterations++;
+    }
+	print("\nPath optimization:");
+	if(processedTime < maxOptimizationTime && iterations < maxIterations) print("Optimal path reached!");
+	else if(iterations == maxIterations) print("Maximum iterations ("+maxIterations+") reached.");
+    print("Number of segments swappped: " + swaps);
+//  print("Total optimization improvement: " + totalImprovement);
+	pathLength = sumArray(segmentLengths);
+    print("Total path length: "+d2s(100*pathLength,1)+" cm (on average "+d2s(1E6*pathLength/(minOf(nrHits,maxNrHits)-1),0)+" µm per hit)");
+    return pathOrder;
+}
 
 
 function makeHistogram(kymographImage, saveName) {
@@ -1591,8 +1619,191 @@ function makeHistogram(kymographImage, saveName) {
 }
 
 
+function classify_cells_using_additional_channel(kymograph_additionalChannel, nr_cells, cellCoordinatesTable) {
+	autoThresholdMethod = "Otsu";
+	nrPositiveCells = 0;
+	minLogInt = -1;	//0.1
+	maxLogInt = 3; 	//1000
+	nrBins = 80;
+
+	Ext.CLIJ2_push(kymograph_additionalChannel);
+	Ext.CLIJ2_meanYProjection(kymograph_additionalChannel, additional_channel_mean_1D);
+	Ext.CLIJ2_pull(additional_channel_mean_1D);
+	Ext.CLIJ2_logarithm(additional_channel_mean_1D, ln_additional_channel_mean);
+	Ext.CLIJ2_multiplyImageAndScalar(ln_additional_channel_mean, log10_additional_channel_mean, 1/log(10));
+	Ext.CLIJ2_release(ln_additional_channel_mean);
+	Ext.CLIJ2_getAutomaticThreshold(log10_additional_channel_mean, autoThresholdMethod, lowerThresholdLog);
+	additionalChannel_intensities = image1DToArray(additional_channel_mean_1D);
+	close(additional_channel_mean_1D);
+	
+	Ext.CLIJ2_pull(log10_additional_channel_mean);
+	run("Histogram", "bins="+nrBins+" x_min="+minLogInt+" x_max="+maxLogInt+" y_max=Auto");
+	rename("(log)Histogram of ch"+additionalChannel);
+	setBatchMode("show");
+	histogramID = getImageID();
+	histogram = getTitle();
+	
+	Ext.CLIJ2_threshold(log10_additional_channel_mean, log10_additional_channel_mean_thresholded, lowerThresholdLog);
+	Ext.CLIJ2_getSumOfAllPixels(log10_additional_channel_mean_thresholded, nrPositiveCells);
+
+	//Draw a line at the threshold location
+	setFont("Sanserif", 12, "antialiased");
+	selectImage(histogram);
+	linePosition = Math.map(lowerThresholdLog, minLogInt, maxLogInt, 0, 256);
+	//Overlay.drawLine(23 + linePosition, 13, 23 + linePosition, 152);
+	Overlay.drawLine(20 + linePosition, 12, 20 + linePosition, 137);
+	setJustification("left");
+	Overlay.drawString(nrPositiveCells, 38 + linePosition, 25, 270);
+//	setJustification("right");
+	Overlay.drawString(nr_cells - nrPositiveCells, 20 + linePosition, 25, 270);
+	Overlay.show();
+	Overlay.setStrokeColor("red");
+	waitForUser("Automatic log(intensity) threshold for channel "+additionalChannel+" is set at "+lowerThresholdLog+".\nFirst press OK, then adjust the threshold if necessary, using the (log)histogram, and left-click to continue.");
+	modifiers = 0;
+
+	while(!isActive(histogramID) || modifiers != 16) {	//left mouse button	
+		Ext.CLIJ2_threshold(log10_additional_channel_mean, log10_additional_channel_mean_thresholded, lowerThresholdLog);
+		Ext.CLIJ2_getSumOfAllPixels(log10_additional_channel_mean_thresholded, nrPositiveCells);
+		selectImage(histogram);
+		getLocationAndSize(hx, hy, hwidth, hheight);
+		getCursorLoc(x, y, z, modifiers);
+		
+		if((x > 0 && x < hwidth) && (y > 0 && y < hheight)) {	//If the cursor is on the histogram window
+			lowerThresholdLog = Math.map(x, 20, 276, minLogInt, maxLogInt);
+			//Draw a red line at the threshold location
+			//setColor(colors[i]);
+			Overlay.setStrokeColor("red");
+			linePosition = Math.map(lowerThresholdLog, minLogInt, maxLogInt, 0, 256);
+			Overlay.clear;
+			//Overlay.drawLine(23 + linePosition, 13, 23 + linePosition, 152);
+			Overlay.drawLine(20 + linePosition, 12, 20 + linePosition, 137);
+//			setJustification("left");
+			Overlay.drawString(nrPositiveCells, 38 + linePosition, 25, 270);
+//			setJustification("right");
+			Overlay.drawString(nr_cells - nrPositiveCells, 20 + linePosition, 25, 270);
+			Overlay.setStrokeColor("red");
+			Overlay.show();
+		}
+		selectImage(histogram);
+		wait(10);
+	}
+	close(additional_channel_mean_1D);
+	lowerThresholdLin = pow(10,lowerThresholdLog);		//transform the threshold back to linear space
+//	Ext.CLIJx_pullArray(log10_additional_channel_mean_thresholded, classified_cells_array);	//Doesn't work (?)
+	Ext.CLIJ2_pull(log10_additional_channel_mean_thresholded);
+	Ext.CLIJ2_release(log10_additional_channel_mean_thresholded);
+	classified_cells_array = image1DToArray(log10_additional_channel_mean_thresholded);
+	close(log10_additional_channel_mean_thresholded);
+	Table.setColumn("ch"+additionalChannel+" intensity", additionalChannel_intensities, cellCoordinatesTable);
+	Table.setColumn("Class", classified_cells_array, cellCoordinatesTable);
+	Table.update;
+	print("\n");
+	print("10log of threshold (channel "+additionalChannel+") : "+lowerThresholdLog);
+	print("Threshold converted to intensities: "+lowerThresholdLin);
+	print("Nr of positive cells: "+nrPositiveCells+" ("+d2s(nrPositiveCells/nr_cells*100,1)+" %)");
+	
+	return newArray(nrPositiveCells, lowerThresholdLog, lowerThresholdLin);
+}
+
+
+
+//TEMP FUNCTION to Plot hits in lifetime vs additional channel intensity
+function makeScatterPlot2D_Hits(kymograph, kymograph_additionalChannel, minIntensity, maxIntensity, saveName, nr_cells, logScaleX, hit_cell_IDs, cellCoordinatesTable) {
+	
+	if(classifyCellsUsingAdditionalChannel == true) classify_results = classify_cells_using_additional_channel(kymograph_additionalChannel, nr_cells, cellCoordinatesTable);
+		
+	selectWindow(labelmap_cells);	//Any image with the 'glasbey on dark' LUT
+	getLut(reds, greens, blues);
+	
+	plotString = "";
+	
+	lifetimes = newArray(nr_cells);
+	intensities = newArray(nr_cells);
+	selectWindow(kymograph);
+	getDimensions(kwidth, kheight, kchannels, kslices, kframes);
+	nrTimePoints = kheight;
+	
+	colors = newArray(nr_cells);
+	isHit = newArray(nr_cells);
+	for(i=0; i<nr_cells; i++) {
+		colors[i] = "#dddddd";
+		if(occursInArray(hit_cell_IDs, i+1)) {
+			colors[i] = "#00a070";
+			isHit[i] = true;
+		}
+	}
+	for(t=0; t<nrTimePoints; t++) {
+		showStatus("Creating additional channel scatter plot...");
+		showProgress(t, nrTimePoints);
+		Plot.create(t, "Intensity_ch"+additionalChannel, "Lifetime (ns)");
+		Plot.setFrameSize(800, 800);
+		Plot.setAxisLabelSize(axisFontSize);
+		if(logScaleX == true) Plot.setLogScaleX(true);
+		Plot.setFontSize(axisFontSize);
+		
+		//First plot non-hits, then the hits, for better visibility
+		k=0;
+		for(i=0; i<nr_cells; i++) {
+			if(!isHit[i]) {
+				selectImage(kymograph);
+				lifetimes[i] = getPixel(i, t);
+				selectImage(kymograph_additionalChannel);
+				intensities[i] = getPixel(i, t);
+				Plot.setColor(colors[i]);
+				x = newArray(1);
+				x[0] = intensities[i];
+//				maxIntensity = maxOf(maxIntensity, intensities[i]);
+				y = newArray(1);
+				y[0] = lifetimes[i];
+				Plot.add("box", x, y);
+				Plot.setStyle(k, ""+colors[i]+","+colors[i]+", 1.0, Box");
+				k++;
+			}
+		}
+		for(i=0; i<nr_cells; i++) {
+			if(isHit[i]) {
+				selectImage(kymograph);
+				lifetimes[i] = getPixel(i, t);
+				selectImage(kymograph_additionalChannel);
+				intensities[i] = getPixel(i, t);
+				Plot.setColor(colors[i]);
+				x = newArray(1);
+				x[0] = intensities[i];
+				maxIntensity = maxOf(maxIntensity, intensities[i]);
+				y = newArray(1);
+				y[0] = lifetimes[i];
+				Plot.add("box", x, y);
+				if(classifyCellsUsingAdditionalChannel == true && Table.get("Class", i) == 1) Plot.setStyle(k, "red,"+colors[i]+", 1.0, Box");
+				else Plot.setStyle(k, ""+colors[i]+","+colors[i]+", 1.0, Box");
+				k++;
+			}
+		}
+		lowerLimit = 0.1;
+		if(logScaleX == true) lowerLimit = maxOf(0.1, pow(10, (Math.log10(minIntensity)-0.2)));
+		Plot.setLimits(lowerLimit, pow(10,(Math.log10(maxIntensity)+0.2)), minLifetime, maxLifetime);
+		if(classifyCellsUsingAdditionalChannel == true) {
+			Plot.setColor("red");
+			Plot.drawLine(classify_results[2], -1/0, classify_results[2], 1/0);
+		}
+		Plot.setColor("gray");
+		Plot.setJustification("left");
+		Plot.addText(d2s(t*frameInterval,0)+" sec", 0.02, 0.05);
+		if(displayGrid == true) Plot.setFormatFlags("11000000111111");
+		else Plot.setFormatFlags("11000000001111");
+		plotString += " image"+t+1+"=["+t+"]";
+		Plot.show();
+	}
+	plotName = saveName + " (scatterplot ch"+additionalChannel+")";
+	if(nrTimePoints>1) run("Concatenate...", "  title=["+plotName+"] open "+plotString);
+	else rename(plotName);
+	setBatchMode("show");	
+	
+	return plotName;
+}
+
+
 //Plot lifetime vs additional channel intensity
-function makeScatterPlot2D(kymograph, kymograph_additionalChannel, maxIntensity, saveName, nr_cells) {
+function makeScatterPlot2D(kymograph, kymograph_additionalChannel, minIntensity, maxIntensity, saveName, nr_cells, logScaleX) {
 	selectWindow(labelmap_cells);	//Any image with the 'glasbey on dark' LUT
 	getLut(reds, greens, blues);
 	
@@ -1607,8 +1818,9 @@ function makeScatterPlot2D(kymograph, kymograph_additionalChannel, maxIntensity,
 		showStatus("Creating additional channel scatter plot...");
 		showProgress(t, nrTimePoints);
 		Plot.create(t, "Intensity_ch"+additionalChannel, "Lifetime (ns)");
-		Plot.setFrameSize(500, 500);
+		Plot.setFrameSize(800, 800);
 		Plot.setAxisLabelSize(axisFontSize);
+		if(logScaleX == true) Plot.setLogScaleX(true);
 		Plot.setFontSize(axisFontSize);
 		for(i=0; i<nr_cells; i++) {
 			selectImage(kymograph);
@@ -1619,14 +1831,18 @@ function makeScatterPlot2D(kymograph, kymograph_additionalChannel, maxIntensity,
 			Plot.setColor(color);
 			x = newArray(1);
 			x[0] = intensities[i];
-			maxIntensity = maxOf(maxIntensity, intensities[i]);
+//			maxIntensity = maxOf(maxIntensity, intensities[i]);
+//			minIntensity = minOf(minIntensity, intensities[i]);
 			y = newArray(1);
 			y[0] = lifetimes[i];
 			Plot.add("box", x, y);
 			Plot.setStyle(i, ""+color+","+color+", 1.0, Box");
 		}
-		Plot.setLimits(0, maxIntensity, minLifetime, maxLifetime);
-		Plot.addText(d2s(t*frameInterval,0)+" sec", 0.17, 0.08);
+		lowerLimit = 0;
+		if(logScaleX == true) lowerLimit = maxOf(0.1, pow(10, (Math.log10(minIntensity)-0.2)));
+		Plot.setLimits(lowerLimit, pow(10, (Math.log10(maxIntensity)+0.2)), minLifetime, maxLifetime);
+		Plot.setJustification("left");
+		Plot.addText(d2s(t*frameInterval,0)+" sec", 0.02, 0.05);
 		if(displayGrid == true) Plot.setFormatFlags("11000000111111");
 		else Plot.setFormatFlags("11000000001111");
 		plotString += " image"+t+1+"=["+t+"]";
@@ -1640,7 +1856,7 @@ function makeScatterPlot2D(kymograph, kymograph_additionalChannel, maxIntensity,
 }
 
 
-function makeScatterPlot(kymograph, cellStatsTable, parameter, saveName, nr_cells) {
+function makeScatterPlot(kymograph, cellStatsTable, parameter, saveName, nr_cells, logScaleX) {
 	selectWindow(labelmap_cells);	//Any image with the 'glasbey on dark' LUT
 	getLut(reds, greens, blues);
 
@@ -1653,12 +1869,15 @@ function makeScatterPlot(kymograph, cellStatsTable, parameter, saveName, nr_cell
 	lifetimes = newArray(nr_cells);
 	selectWindow(kymograph);
 	getDimensions(kwidth, kheight, kchannels, kslices, kframes);
+	minIntensity = getValue("Min");
+	maxIntensity = getValue("Max");
 	nrTimePoints = kheight;
 	for(t=0; t<nrTimePoints; t++) {
 		showStatus("Creating "+parameter+" scatter plot...");
 		showProgress(t, nrTimePoints);
 		Plot.create(t, parameter, "Lifetime (ns)");
-		Plot.setFrameSize(500, 500);
+		Plot.setFrameSize(800, 800);
+		if(logScaleX == true) Plot.setLogScaleX(true);
 		Plot.setAxisLabelSize(axisFontSize);
 		Plot.setFontSize(axisFontSize);
 		for(i=0; i<nr_cells; i++) {
@@ -1672,8 +1891,11 @@ function makeScatterPlot(kymograph, cellStatsTable, parameter, saveName, nr_cell
 			Plot.add("box", x, y);
 			Plot.setStyle(i, ""+color+","+color+", 1.0, Box");
 		}
-		Plot.setLimits(0, maxValue, minLifetime, maxLifetime);
-		Plot.addText(d2s(t*frameInterval,0)+" sec", 0.17, 0.08);
+		lowerLimit = 0;
+		if(logScaleX == true) lowerLimit = maxOf(0.1, pow(10, (Math.log10(minIntensity)-0.2)));
+		Plot.setLimits(lowerLimit, maxValue, minLifetime, maxLifetime);
+		Plot.setJustification("left");
+		Plot.addText(d2s(t*frameInterval,0)+" sec", 0.02, 0.05);
 		if(displayGrid == true) Plot.setFormatFlags("11000000111111");
 		else Plot.setFormatFlags("11000000001111");
 		plotString += " image"+t+1+"=["+t+"]";
@@ -1855,8 +2077,8 @@ function color_hits_on_RGB_overlay(RGB_overlay, hitList, color, tile) {
 	roiManager("show all without labels");
 }
 
-
-function plot_hit_locations(hitList, topHitList, tiles) {
+/*
+function plot_hit_locations_old(hitList, topHitList, tiles) {
 	Plot.create("Hit positions", "X (mm)", "Y (mm)");
 	Plot.setFrameSize(768, 768);
 
@@ -1904,6 +2126,56 @@ function plot_hit_locations(hitList, topHitList, tiles) {
 	ySpan = yMax - yMin;
 	span = maxOf(xSpan, ySpan);
 	Plot.setLimits(xMin - tileSizeX*100, xMin + span + tileSizeX*100, yMin - tileSizeY*100, yMin + span + tileSizeY*100);
+	setBatchMode("show");
+}
+*/
+
+function plot_hit_locations(hitlists_to_plot, legend, tiles) {
+	hitlists = split(hitlists_to_plot, ",");
+	Plot.create("Hit positions", "X (mm)", "Y (mm)");
+	Plot.setFrameSize(768, 768);
+	colors = newArray("blue", "red", "green", "magenta", "black", "cyan");
+//TO DO: REARRANGE THE TABLE ACCORDING TO THE OPTIMIZATION (OR ONLY THE POSITIONS IN THE PLOT?)
+	for(i=0; i<hitlists.length-1; i++) {	// -1 because there is a trailing comma in the string 
+		//print(i+": "+hitlists[i]);
+		selectWindow(hitlists[i]);
+		Plot.setLineWidth(1);
+//		Plot.setColor(colors[i]);
+		X = Table.getColumn("AbsPosX (m)");
+		Y = Table.getColumn("AbsPosY (m)");
+		X = multiplyArraywithScalar(X, 1000);
+		Y = multiplyArraywithScalar(Y, -1000);
+		Plot.add("circle", X, Y);
+//		color = getLabelColor(i, nr_cells);
+//		Plot.setColor(colors[i]);
+		Plot.setStyle(i, ""+colors[i]+","+colors[i]+",1.0,Connected Circles");
+	}
+	//Draw tiles as gray squares
+	lefts = newArray(tiles);
+	tops = newArray(tiles);
+	rights = newArray(tiles);
+	bottoms = newArray(tiles);
+	for (tile = 0; tile < tiles; tile++) {
+		lefts[tile] = (d2s((-parseFloat(stagePositions[2*tile+1]) - (tileSizeX)/2)*1000, 10));	//extra brackets, because ImageJ treats these as numbers
+		tops[tile] = (d2s((-parseFloat(stagePositions[2*tile]) - (tileSizeY)/2)*-1000, 10));
+		rights[tile] = (d2s((-parseFloat(stagePositions[2*tile+1]) - (tileSizeX)/2 + tileSizeX)*1000, 10));
+		bottoms[tile] = (d2s((-parseFloat(stagePositions[2*tile]) - (tileSizeY)/2 + tileSizeY)*-1000, 10));
+	}
+	Plot.setColor("gray");
+	Plot.setLineWidth(2);
+	Plot.drawShapes("rectangles", lefts, tops, rights, bottoms);
+//	if(displayGrid == true) Plot.setFormatFlags("11000000111111");
+//	else Plot.setFormatFlags("11000000001111");
+	Plot.setFormatFlags("11000000001111");
+	Plot.setAxisLabelSize(axisFontSize);
+	Plot.setFontSize(axisFontSize);	
+	Plot.getLimits(xMin, xMax, yMin, yMax);
+	xSpan = xMax - xMin;
+	ySpan = yMax - yMin;
+	span = maxOf(xSpan, ySpan);
+	Plot.setLimits(xMin - tileSizeX*100, xMin + span + tileSizeX*100, yMin - tileSizeY*100, yMin + span + tileSizeY*100);
+	Plot.setLegend(legend, "top-right");
+	Plot.show();
 	setBatchMode("show");
 }
 
@@ -2060,15 +2332,87 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 	}
 
 	//Measure pixel coordinates of all cells within the tile
-	selectWindow(labelmap);
+	selectImage(labelmap);
 	Ext.CLIJ2_push(labelmap);
 	run("Clear Results");
-	Ext.CLIJ2_statisticsOfBackgroundAndLabelledPixels(labelmap, labelmap);	//Possibility to measure the intensity as well - currently not implemented
-	Ext.CLIJ2_getMaximumOfAllPixels(labelmap, nr_cells);
-	Ext.CLIJ2_release(labelmap);
-	x_coords = Table.getColumn("CENTROID_X", "Results");	//N.B. First entry [0] is the background
-	y_coords = Table.getColumn("CENTROID_Y", "Results");
+	if(runScreen == true && refinePositions_boolean == true && File.exists(labkitClassifierFile)) {
+		//Labkit cannot return an image in batch mode, so we have to go out here, but first display a kymograph we need later.
+		if(classifyCellsUsingAdditionalChannel == true && additionalChannel != -1) {
+			selectImage(kymograph_additionalChannel);
+			setBatchMode("show");
+//			selectImage(labelmap_cells);
+//			setBatchMode("show");
+		}
+		setBatchMode(false);
 
+		selectImage("intensity");
+		normalize_image_by_threshold("intensity", "Otsu");
+		showStatus("Predicting nuclei...");
+		run("Calculate Probability Map With Labkit", "input=[intensity] segmenter_file="+labkitClassifierFile+" use_gpu=false");
+		Stack.setDisplayMode("grayscale");
+		probability_map = getTitle();
+		run("Duplicate...", "duplicate title=[squared_probability_map_nuclei] channels="+labkitNucleiChannel);
+		probability_map_nuclei = getTitle();
+		close(probability_map);
+		setBatchMode(true);
+		changeValues(0, 0.5, 0);	//set low probability to 0
+		run("Morphological Filters", "operation=Opening element=Disk radius=1");	//Filter out individual pixels
+		run("Square");				//Square to make high probability pixels count even more
+		Ext.CLIJ2_push(probability_map_nuclei);
+		Ext.CLIJ2_erodeLabels(labelmap, labelmap_eroded, nucleiProbabilityErosionRadius, false);	//shrink labels with 2 pixels
+		//N.B. Small cells are remved because of this - DOUBLECHECK IF EVERYTHING ELSE DEPENDING ON THIS STILL WORKS!! (probably not) 
+		Ext.CLIJ2_mask(probability_map_nuclei, labelmap_eroded, probability_map_nuclei_eroded);
+		Ext.CLIJ2_statisticsOfBackgroundAndLabelledPixels(probability_map_nuclei, labelmap_eroded);
+		Ext.CLIJ2_release(probability_map_nuclei);
+		Ext.CLIJ2_pull(probability_map_nuclei_eroded);
+		run("Merge Channels...", "c1=intensity c2="+probability_map_nuclei_eroded+" create keep");
+		close("intensity");
+		rename("intensity");
+		Stack.setChannel(2);
+		run("Red");
+		setMinAndMax(0.5, 1);
+		Stack.setChannel(1);
+		run("Grays");
+		run("Enhance Contrast", "saturated=0.35");
+		Stack.setActiveChannels("10");
+		setBatchMode("show");
+
+		close(probability_map_nuclei);
+	}
+	else {
+		Ext.CLIJ2_statisticsOfBackgroundAndLabelledPixels(labelmap, labelmap);
+		labelmap_eroded = labelmap;
+		if(runScreen == true && refinePositions_boolean == true && !File.exists(labkitClassifierFile)) print("[WARNING] Labkit classifier file \'"+labkitClassifierFile+"\' not found!)\nCannot detect nuclei to optimize the hit positions.");
+	}
+	Ext.CLIJ2_getMaximumOfAllPixels(labelmap_eroded, nr_cells);
+//	Ext.CLIJ2_release(labelmap);
+	Ext.CLIJ2_release(labelmap_eroded);
+
+	x_coords_centroids = Table.getColumn("CENTROID_X", "Results");	//N.B. First entry [0] is the background
+	y_coords_centroids = Table.getColumn("CENTROID_Y", "Results");
+
+	if(runScreen == true && refinePositions_boolean == true) {
+		x_coords = Table.getColumn("MASS_CENTER_X", "Results");			//N.B. First entry [0] is the background. Alternative option: Gaussian blur + (highest) maxima detection for each label
+		y_coords = Table.getColumn("MASS_CENTER_Y", "Results");
+		for (i = 0; i < x_coords.length; i++) {
+			if(isNaN(x_coords[i])) x_coords[i] = x_coords_centroids[i];	//Use centroids for cells that don't have intensity in the probability map 
+			if(isNaN(y_coords[i])) y_coords[i] = y_coords_centroids[i];
+		}
+		selectImage("intensity");
+		roiManager("Show All");
+		makeSelection("point medium red cross", x_coords, y_coords);
+		Overlay.addSelection;
+		Overlay.setPosition(0);
+		makeSelection("point medium cyan cross", x_coords_centroids, y_coords_centroids);
+		Overlay.addSelection;
+		Overlay.setPosition(0);
+		run("Select None");
+	}
+	else {
+		x_coords = x_coords_centroids;
+		y_coords = y_coords_centroids;
+	}
+	
 	//Fill table with absolute coordinates of all cells of all tiles
 	cellCoordinatesTable = "Cell_coordinates";
 	if(!isOpen(cellCoordinatesTable)) {
@@ -2093,7 +2437,7 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 		Table.set("AbsPosX (m)", total_cells_all_tiles + i-1, d2s(-parseFloat(stagePositions[2*tile+1]) - tileSizeX/2 + parseFloat((x_coords[i]*pixelWidth)/1E6),10), cellCoordinatesTable);
 		Table.set("AbsPosY (m)", total_cells_all_tiles + i-1, d2s(-parseFloat(stagePositions[2*tile]) - tileSizeY/2 + parseFloat((y_coords[i]*pixelHeight)/1E6),10), cellCoordinatesTable);
 	}
-	Table.update;
+	Table.update(cellCoordinatesTable);
 
 /*
 	selectWindow(lifetimeTable);
@@ -2127,7 +2471,7 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 		else if(hit_additional_channel_choice == "between") print("Detecting hits in additional channel ("+additionalChannel+"): "+hit_additional_channel_timing+" "+hit_additional_channel_choice+" "+hit_additional_channel_number1+" and "+hit_additional_channel_number2+".");
 	}
 	else if(hit_additional_channel_boolean) {
-		print("WARNING: Find hits in additional channel is checked, but this parameter is not correctly set! (current value: "+additionalChannel+"). No hits will be registered.");
+		print("[WARNING] Find hits in additional channel is checked, but this parameter is not correctly set! (current value: "+additionalChannel+"). No hits will be registered.");
 		hit_additional_channel_boolean = false;
 	}
 
@@ -2175,7 +2519,7 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 
 	if(generateRandomHits_boolean == false) {
 		for(i=0; i<nr_cells; i++) {
-	//		if(!reanalyze_boolean) {
+	//		if(!reapply_boolean) {
 				selectImage(kymograph);
 				makeRectangle(i, 0, 1, kheight);
 	//			lifetime_cell = Table.getColumn(headers[i+1], lifetimeTable);
@@ -2240,7 +2584,7 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 			if(baseline_calibration_difference_boolean == true && ( (mean_calibration - mean_baseline) < baseline_calibration_difference_number_low || (mean_calibration - mean_baseline) > baseline_calibration_difference_number_high) ) validTrace = false;
 			if(mean_calibration - mean_baseline == NaN) validTrace = false;
 			if(baseline_avg_baseline_difference_boolean == true && mean_baseline - baselineAverage > baseline_avg_baseline_difference_number) validTrace = false;
-			if(mean_calibration - mean_baseline == NaN) print("WARNING: NaN found in the data. Average values are NaN as well.");
+			if(mean_calibration - mean_baseline == NaN) print("[WARNING] NaN found in the data. Average values are NaN as well.");
 
 			
 			potential_hit = false;
@@ -2323,7 +2667,6 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 						else if(hit_avg_response_choice == "higher") {
 							if((mean_response_diff_timed / max_response_diff) > hit_avg_response_number) {
 								if(debugMode) print("Potential hit found: Tile "+tile+", cell "+i+1+ ", with mean fraction of max response difference with baseline "+mean_response_diff_timed / max_response_diff+" ("+mean_response_timed+" / "+max_response_diff+")"+".");
-		print(mean_response_diff_timed, max_response_diff, hit_avg_response_number * max_response_diff);
 								Table.set("Cell", nrHits, i+1, hitList);
 								Table.set("mean response", nrHits, mean_response, hitList);	
 								potential_hit = true;
@@ -2469,6 +2812,7 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 						mean_additional_channel_intensity = getValue("Mean");
 					}
 					Table.set("intensity ch"+additionalChannel, i, mean_additional_channel_intensity, cellCoordinatesTable);
+					
 					if(hit_additional_channel_choice == "lower") {
 						if(mean_additional_channel_intensity < hit_additional_channel_number1) {
 							if(debugMode) print("Potential hit found: Tile "+tile+", cell "+i+1+ ", with mean intensity "+mean_additional_channel_intensity+".");
@@ -2602,7 +2946,7 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 	}
 	
 	//Display the additional channel average intensity
-	if(hit_additional_channel_boolean == true && additionalChannel > 0) {
+	if(hit_additional_channel_boolean == true && additionalChannel > 0 && reapply_boolean == false) {
 		if(hit_additional_channel_timing == "Average intensity" && singleFrame == false) {
 			selectWindow(input_image);
 			run("Duplicate...", "title=Channel"+additionalChannel+" duplicate channels="+additionalChannel);
@@ -2645,7 +2989,7 @@ function find_hits(labelmap, kymograph, kymograph_additionalChannel, tile) {
 	Plot.show();
 	setBatchMode("show");
 */
-	return hitList;
+	return newArray(hitList, cellCoordinatesTable);
 }
 
 
@@ -2659,6 +3003,10 @@ function register_hit(hitList, nrHits, cell, tile, x, y) {
 	Table.set("TilePosY", nrHits, d2s(-parseFloat(stagePositions[2*tile]) - tileSizeY/2, 10), hitList);		//X and Y seem to be reversed!
 	Table.set("AbsPosX (m)", nrHits, d2s(-parseFloat(stagePositions[2*tile+1]) - tileSizeX/2 + parseFloat((x*pixelWidth)/1E6),10), hitList);
 	Table.set("AbsPosY (m)", nrHits, d2s(-parseFloat(stagePositions[2*tile]) - tileSizeY/2 + parseFloat((y*pixelHeight)/1E6),10), hitList);
+	if(hit_additional_channel_boolean == true && additionalChannel > 0) {
+//		mean_additional_channel_intensity = Table.get("intensity ch"+additionalChannel, cell, cellCoordinatesTable);
+		Table.set("intensity ch"+additionalChannel, nrHits, Table.get("intensity ch"+additionalChannel, cell, cellCoordinatesTable), hitList);
+	}
 }
 
 
@@ -2767,6 +3115,7 @@ function measure_intensity_in_additional_channel(image, additionalChannel) {
 
 	kymograph_additionalChannel = measure_intensities(saveName+"_ch"+additionalChannel, nr_cells, generateTables);
 	maxIntensity = getValue("Max");
+	minIntensity = getValue("Min");
 	if(generateTables) {
 //		for (i = 0; i < nr_cells; i++) Table.renameColumn("Mean(cell_"+i+1+")", "cell_"+IJ.pad(i+1,5));
 		if(frames > 1) {
@@ -2794,7 +3143,7 @@ function measure_intensity_in_additional_channel(image, additionalChannel) {
 //	Table.rename("Results", "Intensity_table_ch"+additionalChannel);
 
 	close(saveName+"_ch"+additionalChannel);
-	return newArray(kymograph_additionalChannel, maxIntensity);
+	return newArray(kymograph_additionalChannel, minIntensity, maxIntensity);
 }
 
 
@@ -2832,7 +3181,6 @@ setBatchMode(false);	//Somehow it doesn't want to select this image in Batch Mod
 selectImage(labelmap_cells);
 setBatchMode(true);
 	if(!speedup) labels_to_ROI_Manager(labelmap_cells);
-	//run("NKI Labelmap to ROI Manager");
 	else if (speedup) {
 		run("Label image to ROIs", "rm=[RoiManager[visible=true]]");	//fast BIOP plugin, but composite ROIs from Cellpose mess it up
 		run("Clear Results");
@@ -2849,7 +3197,7 @@ setBatchMode(true);
 		max = getValue("Max");
 		if(max == roiManager("count")) print("Nr. of labels matches nr. of ROIs.");
 		else {
-			waitForUser("WARNING!  Nr. of labels ("+max+") does not match nr. of ROIs. ("+roiManager("count")+"). Press OK to continue.");
+			waitForUser("[WARNING] Nr. of labels ("+max+") does not match nr. of ROIs. ("+roiManager("count")+"). Press OK to continue.");
 			nr_cells = max;	//TO DO: CHECK if this actually works out!
 		}
 	}
@@ -2916,7 +3264,7 @@ setBatchMode(true);
 	}
 
 	//Construct plot of all traces, or a histogram if there is only one time point.
-	if(microscope == "Confocal TCSPC / TauSeparation") 	y_axis = "Lifetime (ns)";
+	if(microscope == "Fitted TCSPC data / TauSeparation") 	y_axis = "Lifetime (ns)";
 	else if(microscope == "TauContrast") 				y_axis = "Lifetime (ns)";
 	else if(microscope == "Fast FLIM") 					y_axis = "Lifetime (ns)";
 	else if(microscope == "Frequency Domain FLIM")		y_axis = "Lifetime (ns)";
@@ -3051,7 +3399,7 @@ setBatchMode(true);
 				print("Baseline-only mode active");
 			}
 			else if (stimCalFrames.length == 1  && stimCalFrames[0] != 0) {
-				print("WARNING!  Stimulation and calibration frames are set to manual, but the parameter field does not have two values!\nProceeding with automatic detection.");
+				print("[WARNING] Stimulation and calibration frames are set to manual, but the parameter field does not have two values!\nProceeding with automatic detection.");
 				manualStimCalFrames = "";
 			}
 		}
@@ -3081,12 +3429,12 @@ setBatchMode(true);
 			if(maxima.length == 0) {	//No stimulation and no calibration found
 				stimulationFrame = 0;
 				calibrationFrame = -1;
-				print("WARNING: no stimulation frame and no calibration frame detected! Using the full trace for sorting the traces."); 
+				print("[WARNING] no stimulation frame and no calibration frame detected! Using the full trace for sorting the traces."); 
 			}
 			else if(maxima.length == 1) {	//No calibration found or no stimulation found
 				stimulationFrame = maxima[0]-1;
 				calibrationFrame = -1;
-				print("WARNING: no calibration frame detected! Stimulation detected at "+stimulationFrame*frameInterval+" seconds (frame "+stimulationFrame+").");
+				print("[WARNING] no calibration frame detected! Stimulation detected at "+stimulationFrame*frameInterval+" seconds (frame "+stimulationFrame+").");
 			}
 			else if(maxima.length >= 2 && maxima[0] < maxima[1]) { //Then stimulation causes a faster change than calibration: reverse them if this is not the case.
 				stimulationFrame = maxima[0]-1;
@@ -3518,7 +3866,6 @@ function segment_cells_manually(intensity_stack) {
 	rename("labelmap_cells");
 	roiManager("reset");
 	run("glasbey on dark");
-
 	labelmap_cells = "labelmap_cells";
 	Ext.CLIJ2_push(labelmap_cells);
 	Ext.CLIJ2_statisticsOfLabelledPixels(intensity_image, labelmap_cells);
@@ -3598,13 +3945,16 @@ function segment_cells_no_nuclei(intensity_stack) {
 				if(CellposeModel != "custom") run("Cellpose Advanced", "diameter="+CellposeDiameter+" cellproba_threshold="+CellposeProbability+" flow_threshold="+CellposeFlowThreshold+" anisotropy=1.0 diam_threshold=12.0 model="+CellposeModel+" nuclei_channel=0 cyto_channel=1 dimensionmode=2D stitch_threshold=-1.0 omni=false cluster=false additional_flags=");
 				else run("Cellpose Advanced (custom model)", "diameter="+CellposeDiameter+" cellproba_threshold="+CellposeProbability+" flow_threshold=0.7 anisotropy=1.0 diam_threshold=12.0 model_path=["+cellposeModelPath+"] model=["+cellposeModelPath+"] nuclei_channel=0 cyto_channel=1 dimensionmode=2D stitch_threshold=-1.0 omni=false cluster=false additional_flags=");
 			}
-			else if(newCellposeWrapper) {
+			else if(newCellposeWrapper && CellposeModel!="cpsam") {
 				if(CellposeModel != "custom") run("Cellpose ...", "env_path="+env_path+" env_type="+env_type+" model="+CellposeModel+" model_path=path\\to\\own_cellpose_model diameter="+CellposeDiameter+" ch1=1 ch2=0 additional_flags=[--use_gpu, --flow_threshold="+CellposeFlowThreshold+", --cellprob_threshold="+CellposeProbability+"]");
 				else run("Cellpose ...", "env_path="+env_path+" env_type="+env_type+" model=["+cellposeModelPath+"] model_path=["+cellposeModelPath+"] diameter="+CellposeDiameter+" ch1=1 ch2=0 additional_flags=[--use_gpu, --flow_threshold="+CellposeFlowThreshold+", --cellprob_threshold="+CellposeProbability+"]");
 			}
-
+			else if(newCellposeWrapper && CellposeModel=="cpsam") {
+				if(CellposeModel != "custom") run("Cellpose SAM...", "env_path="+env_path_cpsam+" env_type="+env_type_cpsam+" model="+CellposeModel+" model_path=path\\to\\own_cellpose_model diameter="+CellposeDiameter+" ch1=1 ch2=0 additional_flags=[--use_gpu, --flow_threshold="+CellposeFlowThreshold+", --cellprob_threshold="+CellposeProbability+"]");
+				else run("Cellpose SAM...", "env_path="+env_path_cpsam+" env_type="+env_type_cpsam+" model=["+cellposeModelPath+"] model_path=["+cellposeModelPath+"] diameter="+CellposeDiameter+" ch1=1 ch2=0 additional_flags=[--use_gpu, --flow_threshold="+CellposeFlowThreshold+", --cellprob_threshold="+CellposeProbability+"]");
+			}
 			if(getTitle() != "intensity_image_for_Cellpose-cellpose") {
-				print("Cellpose failed!\nCheck the Fiji console for more information. Waiting 60 seconds and then trying again...");
+				print("Cellpose failed!\nCheck the Fiji console for more information.\nWaiting 60 seconds and then trying again... (sometimes this helps; press ESC to cancel)");
 				wait(60000);
 			}
 			else cellpose_success = true;
@@ -3628,43 +3978,45 @@ function segment_cells_no_nuclei(intensity_stack) {
 
 	//Measure circularity
 	run("Analyze Regions", "circularity");
-	if(Table.size("labelmap_cells-Morphometry") == 0) break;
-	circularity_ = Table.getColumn("Circularity", "labelmap_cells-Morphometry");
-	circularity_mask = createBinaryArrayWhereSmallerThanCutoff(circularity_, maxCircularity);
-	circularity_mask_expanded = insertElementIntoArrayAtPosition(0, circularity_mask, 0);
-	Ext.CLIJ2_pushArray(circularity_mask_GPU, circularity_mask_expanded, circularity_mask_expanded.length, 1, 1);
-
-	labelmap_cells = "labelmap_cells";
-	Ext.CLIJ2_push(labelmap_cells);
-	close("labelmap_cells");
 	
-	Ext.CLIJ2_excludeLabelsOutsideSizeRange(labelmap_cells, labelmap_cells_sizeFiltered, minCellSize, 1e8);
-
-	run("Clear Results");
-	Ext.CLIJ2_statisticsOfBackgroundAndLabelledPixels(intensity_image, labelmap_cells_sizeFiltered);
-	Ext.CLIJ2_pushResultsTableColumn(mean_Intensity_vector, "MEAN_INTENSITY");
-	Ext.CLIJ2_mask(mean_Intensity_vector, circularity_mask_GPU, mean_Intensity_vector_masked);
-	Ext.CLIJ2_excludeLabelsWithValuesOutOfRange(mean_Intensity_vector_masked, labelmap_cells_sizeFiltered, labelmap_cells_sizeAndIntensityFiltered, minCellBrightness, 1e30);
-	Ext.CLIJ2_release(labelmap_cells);
-	Ext.CLIJ2_release(labelmap_cells_sizeFiltered);
-	run("Clear Results");
-	Ext.CLIJ2_statisticsOfLabelledPixels(intensity_image, labelmap_cells_sizeAndIntensityFiltered);
-	Table.rename("Results", "Cell_statistics");
-	Table.save(output + saveName + "_Cell_statistics.tsv");
+	if(Table.size("labelmap_cells-Morphometry") != 0) {
+		circularity_ = Table.getColumn("Circularity", "labelmap_cells-Morphometry");
+		circularity_mask = createBinaryArrayWhereSmallerThanCutoff(circularity_, maxCircularity);
+		circularity_mask_expanded = insertElementIntoArrayAtPosition(0, circularity_mask, 0);
+		Ext.CLIJ2_pushArray(circularity_mask_GPU, circularity_mask_expanded, circularity_mask_expanded.length, 1, 1);
 	
-	Ext.CLIJ2_release(circularity_mask_GPU);
-	Ext.CLIJ2_release(mean_Intensity_vector);
-	Ext.CLIJ2_release(mean_Intensity_vector_masked);
-	Ext.CLIJ2_release(intensity_image);
-	Ext.CLIJ2_pull(labelmap_cells_sizeAndIntensityFiltered);
-	Ext.CLIJ2_release(labelmap_cells_sizeAndIntensityFiltered);
+		labelmap_cells = "labelmap_cells";
+		Ext.CLIJ2_push(labelmap_cells);
+		close("labelmap_cells");
+		
+		Ext.CLIJ2_excludeLabelsOutsideSizeRange(labelmap_cells, labelmap_cells_sizeFiltered, minCellSize, 1e8);
+	
+		run("Clear Results");
+		Ext.CLIJ2_statisticsOfBackgroundAndLabelledPixels(intensity_image, labelmap_cells_sizeFiltered);
+		Ext.CLIJ2_pushResultsTableColumn(mean_Intensity_vector, "MEAN_INTENSITY");
+		Ext.CLIJ2_mask(mean_Intensity_vector, circularity_mask_GPU, mean_Intensity_vector_masked);
+		Ext.CLIJ2_excludeLabelsWithValuesOutOfRange(mean_Intensity_vector_masked, labelmap_cells_sizeFiltered, labelmap_cells_sizeAndIntensityFiltered, minCellBrightness, 1e30);
+		Ext.CLIJ2_release(labelmap_cells);
+		Ext.CLIJ2_release(labelmap_cells_sizeFiltered);
+		run("Clear Results");
+		Ext.CLIJ2_statisticsOfLabelledPixels(intensity_image, labelmap_cells_sizeAndIntensityFiltered);
+		Table.rename("Results", "Cell_statistics");
+		Table.save(output + saveName + "_Cell_statistics.tsv");
+	
+		Ext.CLIJ2_release(circularity_mask_GPU);
+		Ext.CLIJ2_release(mean_Intensity_vector);
+		Ext.CLIJ2_release(mean_Intensity_vector_masked);
+		Ext.CLIJ2_release(intensity_image);
+		Ext.CLIJ2_pull(labelmap_cells_sizeAndIntensityFiltered);
+		Ext.CLIJ2_release(labelmap_cells_sizeAndIntensityFiltered);
+	}
 	
 	rename("labelmap_cells");
 	run("glasbey on dark");
 	if(getValue("Max") <= 255) setMinAndMax(0, 255);
 	else resetMinAndMax();
 	setBatchMode("show");
-	
+
 	return newArray("labelmap_cells");
 }
 
@@ -3833,7 +4185,7 @@ function correct_drift(image) {
 	}
 */
 	//Prepare intensity image used for registration
-	if (microscope == "Confocal TCSPC / TauSeparation" || microscope == "Ratio Imaging") {
+	if (microscope == "Fitted TCSPC data / TauSeparation" || microscope == "Ratio Imaging") {
 		selectWindow(image);
 		run("Duplicate...", "title=C1_Intensity duplicate channels="+parseInt(intensityChannel));
 		selectWindow(image);
@@ -4139,23 +4491,20 @@ function overlay_intensity(intensity_image, lifetime_stack, saveName, smoothRadi
 	run("RGB Color");
 	run("Split Channels");
 	selectWindow(intensity_image);
-	if(nucleiChannel != -1) {
-		run("Duplicate...", "duplicate channels=1");	//Only the cells, not the nuclei
-		intensity_image = getTitle();
-	}
-
+	run("Duplicate...", "duplicate title=intensity_for_RGB channels=1");	//Only the cells, not the nuclei (if present)
+	intensity_for_RGB = getTitle();
 	run("Enhance Contrast", "saturated="+RGB_brightness);	//TO DO: another way to reliably set the B&C settings
 	run("Conversions...", "scale");
 	run("16-bit");
 //	run("Apply LUT", "stack");
-	showStatus("Generating overlay...");
-	imageCalculator("Multiply 32-bit stack", "splits (red)", intensity_image);
+	showStatus("Generating Lifetime & Intensity RGB overlay...");
+	imageCalculator("Multiply 32-bit stack", "splits (red)", intensity_for_RGB);
 	rename("Red");
 	setMinAndMax(0, 65536*256);
-	imageCalculator("Multiply 32-bit stack", "splits (green)", intensity_image);
+	imageCalculator("Multiply 32-bit stack", "splits (green)", intensity_for_RGB);
 	rename("Green");
 	setMinAndMax(0, 65536*256);
-	imageCalculator("Multiply 32-bit stack", "splits (blue)", intensity_image);
+	imageCalculator("Multiply 32-bit stack", "splits (blue)", intensity_for_RGB);
 	rename("Blue");
 	setMinAndMax(0, 65536*256);
 
@@ -4196,6 +4545,47 @@ function percentile_threshold(percentile) {
 		bin++;
 	} 
 	setThreshold(bin-1, max);
+}
+
+
+//Normalize the image with the median value of Otsu thresholds in every frame
+function normalize_image_by_threshold(image, thresholdMethod) {
+	selectImage(image);
+	setAutoThreshold("Otsu dark");
+	getThreshold(lower, upper);
+
+	if(bitDepth() != 32) run("32-bit");
+	run("Divide...", "value="+lower+" stack");
+	run("Enhance Contrast", "saturated=0.35");
+}
+
+
+//Normalize image based on a double percentile threshold - NOT USED
+function normalize_image(image, lowerPercentile, upperPercentile, ignoreZeros) {
+	selectImage(image);
+	getRawStatistics(nPixels, mean, min, max, std, histogram);
+	if(ignoreZeros == true) nPixels = nPixels - histogram[0];
+	lowerTotal = 0;
+	upperTotal = nPixels;
+
+	i=0;
+	if(ignoreZeros == true) i=1;
+	while (lowerTotal < nPixels*lowerPercentile) {
+		lowerTotal += histogram[i];
+		//print("lower percentile: "+lowerTotal / (nPixels - histogram[0]));
+		i++;
+	}
+	j=histogram.length-1;
+	while (upperTotal > nPixels*upperPercentile) {
+		upperTotal -= histogram[j];
+		//print("upper: "+j+", "+upperTotal / (nPixels - histogram[0]));
+		j--;
+	}
+	//setMinAndMax(i, j);
+	print("Normalizing intensities "+d2s(i,0)+"-"+d2s(j,0)+" to 0-1");
+	run("Subtract...", "value="+i);
+	run("Divide...", "value="+j-i);
+	resetMinAndMax();
 }
 
 
@@ -4315,6 +4705,14 @@ function firstIndexOfArray(array, value) {
 }
 
 
+//Returns the index of the minimum of an array
+function minIndexOfArray(array) {
+	Array.getStatistics(array, min, max, mean, stdDev);
+	index = indexOfArray(array, min);
+	return index[0];
+}
+
+
 //Returns the index of the maximum of an array
 function maxIndexOfArray(array) {
 	Array.getStatistics(array, min, max, mean, stdDev);
@@ -4393,6 +4791,16 @@ function shuffle_array(array) {
 }
 
 
+//Returns the sum of all elements of an arrays, ignoring NaNs
+function sumArray(array) {
+	sum=0;
+	for (a=0; a<array.length; a++) {
+		if(!isNaN(array[a])) sum=sum+array[a];
+	}
+	return sum;
+}
+
+
 //Appends the value to the array
 function appendToArray(value, array) {
 	temparray=newArray(lengthOf(array)+1);
@@ -4419,7 +4827,24 @@ function reverse_table(inputTable){
 	Table.update(inputTable);
 }
 
-Table.update;
+
+//Returns the values in a 1D image (m,1,1) or (1,m,1) as an array
+function image1DToArray(image) {
+	getDimensions(width, height, channels, slices, frames);
+	array = newArray(maxOf(width, height));
+	if(height == 1) {
+		for(x=0; x<width; x++) {
+			array[x] = getPixel(x, 0);
+		}
+	}
+	else if (width == 1) {
+		for(y=0; y<height; y++) {
+			array[y] = getPixel(0, y);
+		}
+	}
+	else exit("Error in function 'image1DToArray': 1D image expected. Dimensions of '"+image+"' are ["+width+", "+height+", "+channels+", "+slices+", "+frames+"]");
+	return array;
+}
 
 
 //Get the persistent value of the script parameter 'param' in class. N.B. This returns 'null' when the parameter is set to the default value!

@@ -1,97 +1,110 @@
+//Macro for inspecting single-cell traces after analysis by FAST-HIPPOS (https://imagej.net/plugins/fast-hippos).
 
-var	operationMode = "Single trace onMouseOver";
-var smoothTraces = 0;
-var selectedTraceLineWidth = 3;
-var useTraceColor = false;
-var playMovie = false;
- 
-macro "Select Traces Tool - C314DbeDcdC314DbfC315DddC315DbdC325DadC326DdeC326C327D02D11C327C328DccC338D13C339D03C339C44aC44bC45bD21C45cD22C45cC45dC46dD14C46dC46eDaeDbcC47eC47fC48fD04D0cC48fDedC48fDfbDfeC48fD0eD8eC49fD9fC49fD1eC49fDe5DebC49fDdcC39fD0dD1cDffC39fD2fC3afD15D2bDcbC3afD0fD8fDf4C3afD7eDdaC3afD7fC3afD1bC3afD1fD2eD3cD3fDe2Df5DfcC2bfDf3C2bfD00D2cD34C2bfD1dD5fDd9C2beD0bD6eDefC2beD20DafDdfDeaC2beD6fDf2C2ceD23D4fC2ceD76De3Df1DfaC2ceC2cdD6dD9eDe6C1cdD2dDecC1cdDe9Df9C1cdD3bDf0C1ddD5eD7dC1ddD01De4C1ddD3eC1dcD3dDe8DeeC1dcD0aD5dD9aC1dcD06D1aD30D40D58Df6C1dcD44D4dDe7C1dcD57Dc3De0C1ebD16D25D9dDd3DdbDf8C1ebD4eD67C1ebD24Dd2C1ebD10C1ebD33D68C1eaC2eaDd1Df7C2eaD4cD66D69D70C2eaD05D31D8dC2eaD2aC2eaD17Da9C2f9D59Db6C2f9De1C3f9D19DfdC3f9D60C3f9D92C3f8D41D82C4f8D77C4f8D51C4f8D6aDc2Dd0C4f7Dd8C5f7D32C5f7D8aC5f7C5f6C6f6D50C6f6D47C6f6D43C6f6Da6C7f5D7aC7f5D35D78C7f5D48Db7C7f5D8bDc1C8f5D29D71D86Da8C8f5D07D79C8f4D61Db3Dc0C8f4D80C8f4D18D95Dd7C9f4D09C9f4Dd4C9f3D53D54D5aCaf3D7bDa2Db8Caf3D81D99Caf3D63D72Db2Caf3D42Da7Caf3Cbf3Da5Cbf3D62Cbf3D73Cbf3D08Cbf3D52D96Ccf3Cce3D85Cce3D5cCce3Cde3Db1Cde3D87DacCde3D83Cde3Cdd3D89Ced3D97Db0Ced3D98DaaCed3D26D88Ced3D91DcaDd5Ced3Da3Cec3Da1Cec3Cfc3D90Cfc3Da0Dd6Cfc3D49Cfb3D28Cfb3D56Cfb3Dc4Cfb3D6bCfb3D93Cfb3Cfa3D6cCfa3D27Cfa3D9bCfa3Cf92DbbCf92D45Cf92D64Cf92D7cCf82D4bDb5Cf82D38D75Cf82D3aCf82Cf72D37Cf71Cf61Db9Cf61D5bCf61D8cCf61Cf51Ce51Ce50Ce40Cd30Cd20Dc9Cc20D4aD9cCc20Cb20Cb10Db4Cb10D46Cb10Ca10Dc7Ca10Dc6Ca10D65Ca10C910C900D74C900D94C900C800D39Dc8C700D84C700D36D55Da4DabDbaDc5"{
+#@ String	operationMode			(label = "Operation mode", choices={"Inspect traces", "Select traces"}, style="radioButtonVertical")
+#@ Integer	smoothTraces			(label = "Smooth traces (mean filter radius)", value=0, min=0)
+#@ Integer	selectedTraceLineWidth	(label = "Line thickness of selected traces", value=3, min=1)
+#@ String	useTraceColor			(label = "Highlight color for cells in RGB overlay", choices={"same as trace in graph", "white"}, style="listBox")
+#@ Boolean	playMovie				(label = "Play single-cell movies (click in plot to open)", value="false");
+#@ Integer	fps						(label = "Playback speed (fps)", value=10, min=1)
+#@ String	segmentation_message	(value="<html><p style='font-size:10px; color:#3366cc'>In 'Inspect traces' mode the macro runs until space bar is pressed.</p></html>", visibility="MESSAGE")
+
+cellSelectionSize = 10;			//expansion radius of multipoint selections, in units (microns)
+highlightedCellThickness = 2;	//thickness of highlighted ROIs
+var firstPass = true;
+
+setOption("DisablePopupMenu", true);
 
 //Initialize
 run("CLIJ2 Macro Extensions", "cl_device=");
 Ext.CLIJ2_clear();
 run("Clear Results");
 close("Results");
+print("\\Clear");
 roiManager("deselect");
 roiManager("Set Color", "gray");
 roiManager("Set Line Width", 1);
+for (i = 0; i < roiManager("count"); i++) {
+	roiManager("select", i);
+	Roi.setUnscalableStrokeWidth(1);
+}
 use_coordinates = false;
 
 //Close previous plots, if present
-window = select_image_containing_string("selected cells");
+window = select_image_containing_string("\\(selected cells\\)");
 if(window != 0) close();
-window = select_image_containing_string("highlighted");
+window = select_image_containing_string("\\(highlighted\\)");
 if(window != 0) close();
 window = select_image_containing_string("kymograph_smoothed");
 if(window != 0) close();
 window = select_image_containing_string("kymograph_sorted_smoothed");
 if(window != 0) close();
-window = select_image_containing_string("lifetime traces plot HITS");
+window = select_image_containing_string("\\(lifetime traces plot HITS\\)");
 if(window != 0) close();
+if(isOpen("Plot Values")) {
+	selectWindow("Plot Values");
+	run("Close");
+}
 
-plot = select_image_containing_string("lifetime traces plot");
+plot_orig = select_image_containing_string("\\(lifetime traces plot\\)");
+if(plot_orig == 0) exit("Error: Inspect and select traces requires a 'lifetime traces plot' image to be open.");
 setLocation(100, 50);
 getLocationAndSize(x, y, width, height);
 Overlay.remove;
 plotname = getTitle();
 basename = substring(plotname, 0, indexOf(plotname, " (lifetime traces plot)"));
-plot_id = getImageID();
-selectImage(plot_id);
+setBatchMode(true);
 print("\\Clear");
-run("NKI get plot styles to log window");		//Run the groovy script to get the plot styles
+run("Get plot styles to log window");		//Run the groovy script to get the plot styles
 logWindow = getInfo("log");
 styles = split(logWindow, "\n");
 print("\\Clear");
+setBatchMode(false);
 
 //Get nr_cells from kymograph width
-kymograph = select_image_containing_string("(kymograph)");
+kymograph = select_image_containing_string("\\(kymograph\\)");
+if(kymograph == 0) exit("Error: Inspect and select traces requires a 'kymograph' image to be open.");
 getDimensions(kwidth, kheight, channels, slices, frames);
 nr_cells = kwidth;
-
+timepoints = kheight;
 selectedTraces = newArray(0);
-print("Retrieving values from "+nr_cells+" traces...");
+getMinAndMax(min, max);
 
-//By doing this only once, time is saved when running multiple times.
-//BUT: if the smooth radius is changed by the user Plot Values has to be closed manually in order to have effect on the selected traces plot!
-PlotValuesTable = "Plot Values";
-if(!isOpen(PlotValuesTable)) {
-	selectImage(plotname);
-waitForUser(getTitle());
-	Plot.showValues();	//Put all traces into the Results table
-	Table.rename("Results", PlotValuesTable);
-//	selectWindow("Results");
-//	IJ.renameResults(PlotValuesTable);
-}
-
-kymograph_sorted = select_image_containing_string("kymograph sorted");
+kymograph_sorted = select_image_containing_string("\\(kymograph sorted\\)");
+if(kymograph_sorted == 0) exit("Error: Inspect and select traces requires a 'kymograph sorted' image to be open.");
+kymograph_sorted_id = getImageID();
 Overlay.remove;
 setLocation(x + width + 2, 50);
 getLocationAndSize(x, y, width, height);
-kymograph_sorted_smoothed = select_image_containing_string("kymograph_sorted_smoothed");
-Overlay.remove;
+//setBatchMode("hide");
+//kymograph_sorted_smoothed = select_image_containing_string("kymograph_sorted_smoothed");
+//Overlay.remove;
 getDimensions(width, height, channels, slices, frames);
-kymograph = select_image_containing_string("(kymograph)");
-setLocation(screenWidth-200, screenHeight-200);
-rank_vector = select_image_containing_string("rank vector");
+
+selectImage(kymograph);
+setLocation(screenWidth-500, screenHeight-500);
+rank_vector = select_image_containing_string("\\(rank vector\\)");
+if(rank_vector == 0) exit("Error: Inspect and select traces requires a 'rank_vector' image to be open.");
 rank_array = image1DToArray(rank_vector);
-setLocation(screenWidth-200, screenHeight-200);
-labelmap = select_image_containing_string("labelmap_cells");
+setLocation(screenWidth-500, screenHeight-500);
+run("Glasbey_on_dark");
+labelmap = select_image_containing_string("\\(labelmap_cells\\)");
 getLut(reds, greens, blues);
-setLocation(screenWidth-200, screenHeight-200);
+setLocation(screenWidth-500, screenHeight-500);
 Overlay.remove;
 run("Select None");
-RGB_overlay = select_image_containing_string("RGB");
+RGB_overlay = select_image_containing_string("RGB overlay");
+if(RGB_overlay == 0) exit("Error: Inspect and select traces requires a 'lifetime and intensity RGB overlay' image to be open.");
+RGB_overlay_id = getImageID();
 setLocation(x, y + height + 70);
 Overlay.remove;
 run("Select None");
 roiManager("Show All without labels");
-
 frameInterval = Stack.getFrameInterval();
-selectImage(kymograph);
-getDimensions(width, height, channels, slices, frames);
-timeArray = Array.getSequence(height);
+run("Animation Options...", "speed="+fps);	//For playing single-cell movies
+getPixelSize(unit, pixelWidth, pixelHeight);
+cellSelectionSize = cellSelectionSize / pixelWidth;	//change cellSelectionSize into pixel units
+timeArray = Array.getSequence(kheight);
 timeArray = multiplyArraywithScalar(timeArray, frameInterval);
-timepoints = Table.size(PlotValuesTable);
 
 //create smooth kymographs
 if(smoothTraces > 0) {
@@ -101,7 +114,7 @@ if(smoothTraces > 0) {
 	Ext.CLIJ2_pull(kymograph_smoothed);
 	Ext.CLIJ2_release(kymograph_smoothed);
 	selectImage(kymograph_smoothed);
-	setLocation(screenWidth-200, screenHeight-200);
+	setLocation(screenWidth-500, screenHeight-500);
 
 	kymograph_sorted_smoothed = "kymograph_sorted_smoothed";
 	selectImage(kymograph_sorted);
@@ -111,27 +124,50 @@ if(smoothTraces > 0) {
 	Ext.CLIJ2_pull(kymograph_sorted_smoothed);
 	Ext.CLIJ2_release(kymograph_sorted_smoothed);
 	selectImage(kymograph_sorted_smoothed);
+//	kymograph_sorted_smoothed_id = getImageID();
 	setLut(reds_kymo, greens_kymo, blues_kymo);
 	setLocation(x + width + 20, y);
-	
+	setMinAndMax(min, max);
 }
-else kymograph_smoothed = kymograph;
+else {
+	kymograph_smoothed = kymograph;
+	kymograph_sorted_smoothed = kymograph_sorted;
+}
+selectImage(kymograph_sorted_smoothed);
 
+setBatchMode(true);
 
 call("ij.gui.ImageWindow.setNextLocation", 100, 50);
-plot = plot_traces_from_kymograph(plot, kymograph_smoothed, newArray(0));	//Recreate the plot from the kymograph (faster than resetting the styles for many traces)
-selectImage(plot_id);
-getLocationAndSize(x, y, width, height);
-run("Close");
-
+plot = plot_traces_from_kymograph(plot_orig, kymograph_smoothed, newArray(0));	//Recreate the plot from the kymograph (faster than resetting the styles for many traces)
+selectImage(plot_orig);
+close();
 selectImage(plot);
-selectTracesToolID = toolID;
+getLocationAndSize(x, y, width, height);
 
-if(operationMode == "Select multiple traces") {
+PlotValuesTable = "Plot Values";
+selectImage(plot);
+showStatus("Retrieving values from "+nr_cells+" traces...");
+Plot.showValues();	//Put all traces into the Results table
+Table.rename("Results", PlotValuesTable);
+
+setBatchMode(false);
+selectImage(plot);
+selectImage(RGB_overlay);
+selectImage(kymograph_sorted);
+selectImage(kymograph_sorted_smoothed);
+setBatchMode(true);
+
+
+
+
+if(operationMode == "Select traces") {
 	setTool("freehand");
 	
 	run("Colors...", "foreground=white background=black selection=red");
-	run("Roi Defaults...", "color=red stroke=5 group=0");
+	run("Roi Defaults...", "color=red stroke=2 group=0");
+
+	setBatchMode(false);
+	
 	waitForUser("Create \n* a ROI in the traces plot\n* a ROI or multi-point selection in the RGB overlay\n* a ROI in the sorted kymograph image\n to highlight cells");
 	run("Roi Defaults...", "color=red stroke=1 group=0");
 	getLocationAndSize(x_coord, y_coord, width, height);
@@ -139,9 +175,7 @@ if(operationMode == "Select multiple traces") {
 	if(selectionType == 10) run("Enlarge...", "enlarge="+cellSelectionSize);	//Enlarge (multi)point selections
 	selectedTraces = newArray(nr_cells);
 	
-	setTool(selectTracesToolID);
 	setBatchMode(true);
-	
 	
 	//Check where the ROI is and get the selected cells
 	if(getTitle() == plot) {
@@ -196,7 +230,7 @@ if(operationMode == "Select multiple traces") {
 	}
 	else if(getTitle() == kymograph_sorted || getTitle() == kymograph_sorted_smoothed) {
 		selection = "kymograph";
-		if(selectionType()>3) exit("In the kymograph an area ROI is required");
+		if(selectionType()>3) exit("In the kymograph a single area ROI is required");
 		getSelectionBounds(x0, y, width, height);
 		x1 = x0 + width;
 		selectedTraces = Array.slice(rank_array, x0, x1);
@@ -217,8 +251,9 @@ if(operationMode == "Select multiple traces") {
 
 	run("Colors...", "foreground=white background=black selection=cyan");
 	
-	plot_highlighted = plot_traces_from_kymograph(plot, kymograph_smoothed, selectedTraces);
-	rename(plot + " highlighted");
+//	plot_highlighted = plot_traces_from_kymograph(plot, kymograph_smoothed, selectedTraces);
+//	rename(plot + " highlighted");
+	selectImage(plot);
 	getLocationAndSize(x, y, width, height);
 	
 	//Create Plot of selected traces
@@ -232,7 +267,9 @@ if(operationMode == "Select multiple traces") {
 }
 
 
-else if (operationMode == "Single trace onMouseOver") {
+
+
+else if (operationMode == "Inspect traces") {
 	//Runs when clicking left mouse button
 	setOption("DisablePopupMenu", true);
 	leftButton=16;
@@ -250,11 +287,11 @@ else if (operationMode == "Single trace onMouseOver") {
 	//Add an empty trace that will become the highlighted trace
 	selectImage(plot);
 	Plot.add("line", newArray(timepoints), newArray(timepoints));
-
+	close(kymograph_smoothed);
 	selectImage(kymograph_sorted);
-	setTool(selectTracesToolID);
-	while(toolID == selectTracesToolID) {
+	while(!isKeyDown("space")) {
 		if(getTitle() == RGB_overlay) {
+//		if(isActive(RGB_overlay_id)) {
 			selectedImage = getTitle();
 			setBatchMode(true);
 			Stack.getPosition(channel, slice, frame);
@@ -264,17 +301,17 @@ else if (operationMode == "Single trace onMouseOver") {
 			if(currentCell != -1) showStatus("cell "+currentCell + 1);
 			else showStatus("background");
 			style = getStyle(0, styles);
-			if(currentCell != -1) { 
+			if(currentCell != -1) {
 				highlight_ROI_in_RGB_overlay(currentCell);
 				if(currentCell != oldCell && oldCell != -1) reset_ROI_to_gray(oldCell);
 				if(isOpen(kymograph_sorted_smoothed)) show_line_on_sorted_kymograph(kymograph_sorted_smoothed, rank_array, currentCell, 2);
+				if(isOpen(kymograph_sorted_smoothed)) show_horizontal_line_on_sorted_kymograph(kymograph_sorted_smoothed, frame, 1);
 				show_line_on_sorted_kymograph(kymograph_sorted, rank_array, currentCell, 2);
-//				show_horizontal_line_on_sorted_kymograph(kymograph_sorted, frame, 1);
-//				show_horizontal_line_on_sorted_kymograph(kymograph_sorted_smoothed, frame, 1);
+				show_horizontal_line_on_sorted_kymograph(kymograph_sorted, frame, 1);
 
 				selectImage(RGB_overlay);
-				if(flags&leftButton != 0) {	//leftclick to show a single trace
-					if(currentCell != -1 && highlightedCell != currentCell) {
+				if(flags&leftButton != 0) {	//leftclick to show a single trace (with index nr_cells, the 'extra' trace)
+					if(currentCell != -1 && highlightedCell != currentCell && currentCell >= 0) {
 						selectImage(plot);
 						Plot.freeze(true);
 						for (i = 0; i < nr_cells; i++) {
@@ -282,7 +319,7 @@ else if (operationMode == "Single trace onMouseOver") {
 						}
 						style = getStyle(currentCell, styles);
 						style[2] = 3;	//change linewidth
-						Plot.replace(nr_cells, style[3], timeArray, Table.getColumn("Y"+currentCell+1, PlotValuesTable));
+						Plot.replace(nr_cells, style[3], timeArray, Table.getColumn("Y"+currentCell, PlotValuesTable));
 						Plot.setStyle(nr_cells, style[0] +","+ style[1] +","+ style[2] +","+ style[3]);
 	 					Plot.freeze(false);
 						selectImage(RGB_overlay);
@@ -297,9 +334,11 @@ else if (operationMode == "Single trace onMouseOver") {
 				}
 			}
 			else {
-				roiManager("Deselect");
-				roiManager("Set Color", "gray");
-				roiManager("Set Line Width", 1);
+//				roiManager("Deselect");
+//				roiManager("Set Color", "gray");
+//				roiManager("Set Line Width", 1);
+				if(oldCell != -1) reset_ROI_to_gray(oldCell);
+				
 				run("Select None");
 				selectImage(kymograph_sorted);
 				Overlay.remove;
@@ -316,8 +355,11 @@ else if (operationMode == "Single trace onMouseOver") {
 				unhide_traces(plot, styles);
 				hidden = false;
 			}
+			show_timeline_on_plot(plot, frame, 2);
+			wait(20);
 		}
-		else if(getTitle() == plot) {
+		if(getTitle() == plot) {
+//		else if(isActive(plot_id)) {
 			selectedImage = getTitle();
 			setBatchMode(true);
 			Plot.getLimits(xMin, xMax, yMin, yMax);
@@ -327,27 +369,47 @@ else if (operationMode == "Single trace onMouseOver") {
 			xLoc = (x - plotX)*calibrationX + xMin;
 			yLoc = -(y - plotY)*calibrationY + yMax;
 			xLocPixel = round(xLoc / frameInterval);
+			//Get lifetimes of all traces at the timepoint where the cursor is.
 			selectWindow(kymograph);
 			makeRectangle(0, xLocPixel, nr_cells, 1);
 			data = getProfile();
+			//Get closest trace
 			closest = get_closest_value_in_array(data, yLoc);
 			traceNrPrevious = traceNr;
 			traceNr = nr_cells - closest[0] - 1;	//This depends on the orientation of the kymograph image
+			traceNr = closest[0];	//This depends on the orientation of the kymograph image
 			showStatus("cell "+traceNr+1+" | t = "+xLoc+" s | tau = "+closest[1]+" ns");
-			print("cell "+traceNr+1+" | t = "+xLoc+" s | tau = "+closest[1]+" ns");
+			//print("cell "+traceNr+1+" | t = "+xLoc+" s | tau = "+closest[1]+" ns");
 			
-			if(traceNr != -1) highlight_ROI_in_RGB_overlay(traceNr);
-			if(traceNr != traceNrPrevious && traceNrPrevious != -1) reset_ROI_to_gray(traceNrPrevious);
+			if(traceNr > 0 && traceNr < nr_cells) highlight_ROI_in_RGB_overlay(traceNr);
+			if(traceNr != traceNrPrevious && traceNrPrevious > 0 && traceNrPrevious < nr_cells) reset_ROI_to_gray(traceNrPrevious);
 			
 			if(isOpen(kymograph_sorted_smoothed)) show_line_on_sorted_kymograph(kymograph_sorted_smoothed, rank_array, traceNr, 2);
+			if(isOpen(kymograph_sorted_smoothed)) show_horizontal_line_on_sorted_kymograph(kymograph_sorted_smoothed, frame, 1);
 			show_line_on_sorted_kymograph(kymograph_sorted, rank_array, traceNr, 2);
-//			show_horizontal_line_on_sorted_kymograph(kymograph_sorted, frame, 1);
-//			show_horizontal_line_on_sorted_kymograph(kymograph_sorted_smoothed, frame, 1);
+			show_horizontal_line_on_sorted_kymograph(kymograph_sorted, frame, 1);
 
 			selectImage(plot);
+			Plot.freeze(true);
+			if(traceNr != traceNrPrevious && traceNr != -1) {
+				style = getStyle(traceNr, styles);
+				Plot.setStyle(traceNr, style[1] +","+ style[1] +","+ selectedTraceLineWidth +","+ style[3]);
+			}
+			if(traceNr != traceNrPrevious && traceNrPrevious != -1) {
+				style = getStyle(traceNr, styles);
+				Plot.setStyle(traceNrPrevious, style[1] +","+ style[1] +", 1.0, "+ style[3]);
+			}
+			Plot.freeze(false);
+			
 			if(flags&leftButton != 0) {	//leftclick to highlight a single trace
 				labelColor = getLabelColorFromStyles(traceNr, styles);
-				Plot.setStyle(traceNr, labelColor+", none,5.0,Line");
+				Plot.setStyle(traceNr, labelColor+", none, "+selectedTraceLineWidth+", Line");
+/*
+				for (i = 0; i < nr_cells; i++) {
+					if(i!=traceNr) Plot.setStyle(i, "#dddddd" +","+ style[1] +","+ style[2] +","+ style[3]);
+				}
+				hidden = true;
+*/
 				if(traceNrPrevious != -1 && traceNrPrevious != traceNr) {
 					Plot.setStyle(traceNrPrevious, labelColor+", none,1.0,Line");
 					labelColor = getLabelColorFromStyles(traceNrPrevious, styles);
@@ -367,52 +429,52 @@ else if (operationMode == "Single trace onMouseOver") {
 					selectWindow(labelmap);
 					roiManager("select", traceNr);
 					close("Cell "+traceNrPrevious+1);
-		//			selectWindow(kymograph);
-		//			makeRectangle(traceNr, 0, 1, maxTime);
 					selectWindow(RGB_overlay);
 					roiManager("select", traceNr);
 					getLocationAndSize(xWindow, yWindow, widthWindow, heightWindow);
 					call("ij.gui.ImageWindow.setNextLocation", xWindow + widthWindow-15, yWindow);
-					run("Enlarge...", "enlarge=5");	//expand ROI with 5 µm
+					run("Enlarge...", "enlarge=5"); //expand ROI with 5 µm
 					run("Duplicate...", "title=[Cell "+traceNr+1+"] duplicate");
-					run("Select None");
-					setBatchMode(false);
-					wait(50);
-					run("Set... ", "zoom=600");
-					setBatchMode(true);
-					if(playMovie) doCommand("Start Animation [\\]");
-
+					Stack.setFrame(frame);
+					updateDisplay();
+					//run("Select None");
+					run("Enlarge...", "enlarge=-5"); //shrink ROI with 5 µm
+					Roi.setUnscalableStrokeWidth(2);
 					setBatchMode("show");
-					selectImage(RGB_overlay);
-
+					//wait(20);
+					run("Set... ", "zoom=799");
+					run("In [+]");	//Zooming in two steps works better
+					if(playMovie && !is("animated")) doCommand("Start Animation [\\]");
 				}
-				setBatchMode(false);
-				wait(50);
+				selectImage(selectedImage);
+				wait(20);
 			}
-			
-			selectWindow(RGB_overlay);
-			if(playMovie) run("Stop Animation");
+
+			selectImage(RGB_overlay);
 			if(traceNr != -1) {
 				if(isOpen("Cell "+traceNr+1)) selectImage("Cell "+traceNr+1);
-				if(playMovie) run("Stop Animation");
 			}
+			
+			show_timeline_on_plot(plot, frame, 2);
+			selectImage(selectedImage);
 		}
-		else if(getTitle() == kymograph_sorted || getTitle() == kymograph_sorted_smoothed) {
+		if(getTitle() == kymograph_sorted || getTitle() == kymograph_sorted_smoothed) {
+//		else if(isActive(kymograph_sorted_id) || isActive(kymograph_sorted_smoothed_id)) {
 			selectedImage = getTitle();
 			setBatchMode(true);
 			selectImage(RGB_overlay);
 			Stack.getPosition(channel, slice, frame);
 			selectImage(rank_vector);
 			currentCell = getPixel(x, 0);	//rank_vector image starts at x=0
-			if(currentCell != 0) showStatus("cell "+currentCell + 1);
+			if(currentCell >= 0) showStatus("cell "+currentCell + 1);
 			else showStatus("");
 			show_line_on_sorted_kymograph(kymograph_sorted, rank_array, currentCell, 2);
 			if(isOpen(kymograph_sorted_smoothed)) show_line_on_sorted_kymograph(kymograph_sorted_smoothed, rank_array, currentCell, 2);
 			show_horizontal_line_on_sorted_kymograph(kymograph_sorted, frame, 1);
 			if(isOpen(kymograph_sorted_smoothed)) show_horizontal_line_on_sorted_kymograph(kymograph_sorted_smoothed, frame, 1);
-//			show_timeline_on_plot(plot, frame, 2);
+			show_timeline_on_plot(plot, frame, 2);
 
-			if(flags == 16) {	//leftclick to show a single trace
+			if(flags == 16 && currentCell >= 0) {	//leftclick to show a single trace
 				selectImage(plot);
 				Plot.freeze(true);
 				for (i = 0; i < nr_cells; i++) {
@@ -420,7 +482,7 @@ else if (operationMode == "Single trace onMouseOver") {
 				}
 				style = getStyle(currentCell, styles);
 				style[2] = 3;	//change linewidth
-				Plot.replace(nr_cells, style[3], timeArray, Table.getColumn("Y"+currentCell+1, PlotValuesTable));
+				Plot.replace(nr_cells, style[3], timeArray, Table.getColumn("Y"+currentCell, PlotValuesTable));
 				Plot.setStyle(nr_cells, style[0] +","+ style[1] +","+ style[2] +","+ style[3]);
 				Plot.freeze(false);
 
@@ -429,11 +491,11 @@ else if (operationMode == "Single trace onMouseOver") {
 			}
 
 			style = getStyle(currentCell, styles);
-			if(currentCell != oldCell && currentCell != 0) {
+			if(currentCell != oldCell && currentCell >= 0) {
 				style = getStyle(currentCell, styles);
 				selectImage(RGB_overlay);
 				roiManager("select", currentCell);
-				if(useTraceColor == true) roiManager("Set Color", style[0]);
+				if(useTraceColor == "same as trace in graph") roiManager("Set Color", style[0]);
 				else roiManager("Set Color", "white");
 				roiManager("Set Line Width", 3);
 				if(oldCell != -1) {
@@ -448,7 +510,7 @@ else if (operationMode == "Single trace onMouseOver") {
 				hidden = false;
 			}
 
-			//left+ctrl to select multiple traces 
+			//left+ctrl to Select traces 
 			selectImage(kymograph_sorted);
 			xa = x;
 			xb = x;
@@ -465,7 +527,7 @@ else if (operationMode == "Single trace onMouseOver") {
 				}
 			}
 			if(ctrl == true && xa != xb) {
-				print(xa, xb);
+				//print(xa, xb);
 				if(xa < xb) selectedTraces = Array.slice(rank_array, maxOf(0,xa), minOf(styles.length, xb));	//prevent crash if cursor is outside the image
 				else selectedTraces = Array.slice(rank_array, maxOf(0,xb), minOf(styles.length, xa));
 				Array.print(selectedTraces);
@@ -473,10 +535,12 @@ else if (operationMode == "Single trace onMouseOver") {
 				Plot.freeze(true);
 				for (i = 0; i < nr_cells; i++) {
 					Plot.setStyle(i, styles[i]+",hidden");
+					//style = getStyle(i, styles);
+					//Plot.setStyle(i, "#dddddd" +","+ style[1] +","+ style[2] +","+ style[3]);
 				}
 				for (i = 0; i < selectedTraces.length; i++) {
 					style = getStyle(selectedTraces[i], styles);
-					style[2] = 3;	//change linewidth
+					//style[2] = selectedTraceLineWidth;	//change linewidth
 					Plot.setStyle(selectedTraces[i], style[0] +","+ style[1] +","+ style[2] +","+ style[3]);
 				}
 				Plot.freeze(false);
@@ -511,7 +575,7 @@ else if (operationMode == "Single trace onMouseOver") {
 		show_horizontal_line_on_sorted_kymograph(kymograph_sorted, frame, 1);
 		if(isOpen(kymograph_sorted_smoothed)) show_horizontal_line_on_sorted_kymograph(kymograph_sorted_smoothed, frame, 1);
 		setBatchMode(false);
-//		selectImage(selectedImage);
+		selectImage(selectedImage);
 		wait(25);
 		getCursorLoc(x, y, z, flags);
 	}
@@ -562,12 +626,12 @@ function highlight_cells_in_RGB_overlay() {
 	roiManager("Set Line Width", 1);
 	for (n = 0; n < selectedTraces.length; n++) {
 		roiManager("select", selectedTraces[n]);
-		if(useTraceColor == true) {
+		if(useTraceColor == "same as trace in graph") {
 			style = getStyle(selectedTraces[n], styles);
 			roiManager("Set Color", style[0]);
 		}
 		else roiManager("Set Color", "white");
-		roiManager("Set Line Width", 3);
+		roiManager("Set Line Width", highlightedCellThickness);
 	}
 	roiManager("Show All without labels");
 	getLocationAndSize(x, y, width, height);
@@ -577,9 +641,10 @@ function highlight_ROI_in_RGB_overlay(cell) {
 	selectImage(RGB_overlay);
 	style = getStyle(cell, styles);
 	roiManager("select", cell);
-	if(useTraceColor == true) roiManager("Set Color", style[0]);
+	if(useTraceColor == "same as trace in graph") roiManager("Set Color", style[0]);
 	else roiManager("Set Color", "white");
-	roiManager("Set Line Width", 3);
+//	roiManager("Set Line Width", 3);
+	Roi.setUnscalableStrokeWidth(3);
 	run("Select None");
 }
 
@@ -587,7 +652,8 @@ function reset_ROI_to_gray(cell) {
 		selectImage(RGB_overlay);
 		roiManager("Select", cell);
 		roiManager("Set Color", "gray");
-		roiManager("Set Line Width", 1);
+//		roiManager("Set Line Width", 1);
+		Roi.setUnscalableStrokeWidth(1);
 		run("Select None");
 }
 
@@ -645,7 +711,7 @@ function show_line_on_sorted_kymograph(image, rank_array, currentCell, thickness
 function show_horizontal_line_on_sorted_kymograph(image, position, thickness) {
 	currentWindow = getTitle();
 	selectImage(image);
-	makeLine(0, position, getWidth(), position, thickness);
+	makeLine(0, position-1, getWidth(), position-1, thickness);
 	Roi.setStrokeColor("black");
 //	Roi.setStrokeWidth(2);
 	run("Add Selection...");
@@ -659,8 +725,20 @@ function show_timeline_on_plot(plot, frame, thickness) {
 	currentWindow = getTitle();
 	selectImage(plot);
 	Plot.getLimits(xMin, xMax, yMin, yMax);
-	Plot.drawLine(frame*frameInterval/xMax, yMin, frame*frameInterval/xMax, yMax);
-	Plot.update();
+	//Plot.drawLine(frame*frameInterval/xMax, yMin, frame*frameInterval/xMax, yMax);	//Doesn't work because plot cannot be addressed by Polt.drawLine (grr)
+	if(firstPass==true) {
+		//Plot.setLineWidth(2);
+		Plot.add("line", newArray((frame-1)*frameInterval,(frame-1)*frameInterval), newArray(yMin, yMax));
+		Plot.setStyle(nr_cells+1, "#000000, none, 2.0, Line");
+		firstPass = false;
+	}
+	else {
+		Plot.freeze(true);
+		Plot.replace(nr_cells+1, "line", newArray((frame-1)*frameInterval,(frame-1)*frameInterval), newArray(yMin, yMax));
+		Plot.setStyle(nr_cells+1, "#000000, none, 2.0, Line");
+		Plot.freeze(false);
+	}
+	//Plot.update();
 	selectWindow(currentWindow);
 }
 
@@ -689,7 +767,6 @@ function plot_traces_from_kymograph(template_plot, kymograph_all, selectedTraces
 	getDimensions(width, height, channels, slices, frames);
 	timeArray = Array.getSequence(height);
 	timeArray = multiplyArraywithScalar(timeArray, frameInterval);
-//	plotName = substring(saveName, 0, saveName.length-4) + " (lifetime traces plot)";
 	plot_new = template_plot;
 	selectImage(template_plot);
 	Plot.getLimits(xMin, xMax, yMin, yMax);
@@ -702,7 +779,7 @@ function plot_traces_from_kymograph(template_plot, kymograph_all, selectedTraces
 	selectImage(kymograph_all);
 
 	run("Rotate 90 Degrees Left");
-//	run("Flip Vertically", "stack");
+	run("Flip Vertically", "stack");
 	getDimensions(width, height, channels, slices, frames);
 	n=0;
 	for (s = 0; s < slices; s++) {
@@ -711,20 +788,24 @@ function plot_traces_from_kymograph(template_plot, kymograph_all, selectedTraces
 			makeRectangle(0, i, width, 1);
 			lifetimeData = getProfile();
 			if(lifetimeData[0] != 0) {
-				color = getLabelColor(i, height);
+				color = getLabelColorFromStyles(i, styles);
 				Plot.setColor(color);
+				style = getStyle(i, styles);
 				if(occursInArray(selectedTraces, n)) Plot.setLineWidth(selectedTraceLineWidth);
 				else Plot.setLineWidth(1.0);
 				Plot.add("line", timeArray, lifetimeData);
-				n++;
+//				To be finished: gray out non-selected traces. But only in the graph that already exists.
+//				if(occursInArray(selectedTraces, n));
+//				else Plot.setStyle(i, "#dddddd" +","+ style[1] +","+ style[2] +","+ style[3]);
+
 			}
 		}
 	}
 	Plot.show();
 	setBatchMode("show");
 	selectImage(kymograph_all);
+	run("Flip Vertically", "stack");
 	run("Rotate 90 Degrees Right");
-//	run("Flip Vertically", "stack");
 	getDimensions(width, height, channels, slices, frames);
 	run("Select None");
 	setBatchMode("show");
@@ -799,7 +880,6 @@ function get_closest_value_in_array(array, value) {
 	p = 0;
 	sorted = Array.copy(array);
 	Array.sort(sorted);
-//	Array.print(sorted);
 	
 	median = sorted[floor(sorted.length)/2];
 	while(sorted.length > 2) {
@@ -842,14 +922,16 @@ function getLabelColor(label, nrOfLabels) {
 	color1 = IJ.pad(toHex(reds[label/nrOfLabels*255]),2);
 	color2 = IJ.pad(toHex(greens[label/nrOfLabels*255]),2);
 	color3 = IJ.pad(toHex(blues[label/nrOfLabels*255]),2);
+//	color1 = IJ.pad(toHex(reds[label]),2);
+//	color2 = IJ.pad(toHex(greens[label]),2);
+//	color3 = IJ.pad(toHex(blues[label]),2);
 	labelColor = "#"+color1+color2+color3;
 	return labelColor;
 }
 
 function getLabelColorFromStyles(label, styles) {
 	style_array = split(styles[label], ",");
-//	print(style_array[0]);
-	labelcolor = style_array[0];
+	labelColor = style_array[0];
 	return labelColor;
 }
 
@@ -868,6 +950,15 @@ function multiplyArraywithScalar(array, scalar) {
 		multiplied_array[a]= (array[a]) * (scalar);
 	}
 	return multiplied_array;
+}
+
+//Adds a scalar to all elements of an array
+function addScalarToArray(array, scalar) {
+	added_array=newArray(lengthOf(array));
+	for (a=0; a<lengthOf(array); a++) {
+		added_array[a]=array[a] + scalar;
+	}
+	return added_array;
 }
 
 //Returns the first index at which a value occurs in an array
@@ -898,22 +989,3 @@ function image1DToArray(image) {
 	return array;
 }
 
-}
-
-
-macro "Select Traces Tool Options" {
-	Dialog.create("Select Traces Options");
-	Dialog.addRadioButtonGroup("", newArray("Single trace onMouseOver", "Select multiple traces"), 2, 1, "Single trace onMouseOver");
-	Dialog.addMessage("\n");
-	Dialog.addNumber("Smooth traces (mean filter radius)", smoothTraces);
-	Dialog.addNumber("Line thickness of selected traces", selectedTraceLineWidth);
-	Dialog.addCheckbox("Use trace color to highlight cells in RGB overlay? (otherwise white)", useTraceColor);
-	Dialog.addCheckbox("Play single cell movie when selecting traces in the graph?", playMovie);
-
-	Dialog.show();
-	operationMode = Dialog.getRadioButton();
-	smoothTraces = Dialog.getNumber();
-    selectedTraceLineWidth = Dialog.getNumber();
-    useTraceColor = Dialog.getCheckbox();
-    playMovie = Dialog.getCheckbox();
-}
